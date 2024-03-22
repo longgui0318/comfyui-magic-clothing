@@ -22,6 +22,11 @@ import comfy.supported_models_base
 import comfy.taesd.taesd
 import comfy.sd
 
+from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel, Timestep
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import *
+from diffusers.models.attention_processor import AttnProcessor
+
+
 def load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, output_clipvision=False, embedding_directory=None, output_model=True):
     # 加载模型检查点文件
     sd = comfy.utils.load_torch_file(ckpt_path)
@@ -94,6 +99,7 @@ def load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, o
             logging.info("loaded straight to GPU")
             comfy.model_management.load_model_gpu(model_patcher)
 
+    model_patcher.set_model_unet_function_wrapper
     # 返回加载的模型 patcher、CLIP 模型、VAE 模型和 CLIP 视觉模型
     return (model_patcher, clip, vae, clipvision)
 
@@ -151,9 +157,10 @@ class ClothAttBlock(nn.Module):
 
 
 
-class OMSUnet(nn.Module):
+class OMSUnet(UNetModel):
     def __init__(self, levels=2, bottleneck_blocks=12, c_hidden=384, c_latent=4, codebook_size=8192):
         super().__init__()
+        
         self.c_latent = c_latent
         c_levels = [c_hidden // (2 ** i) for i in reversed(range(levels))]
 

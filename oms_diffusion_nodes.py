@@ -1,26 +1,49 @@
+import torch
+import copy
+import inspect
+import logging
+import uuid
 import folder_paths
 
-class OmsCheckpointLoaderSimple:
+import comfy.model_patcher
+import comfy.lora
+import comfy.t2i_adapter.adapter
+import comfy.supported_models_base
+import comfy.taesd.taesd
+
+class ExtractFeaturesWithAttention:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "ckpt_name": (folder_paths.get_filename_list("checkpoints"), ),
-                             }}
-    RETURN_TYPES = ("MODEL", "CLIP", "VAE")
-    FUNCTION = "load_checkpoint"
+        return {"required":
+                {"model": ("MODEL",),
+                 "clip": ("CLIP", ),
+                 "feature_image": ("LATENT", ),
+                 }
+                }
+    RETURN_TYPES = ("MODEL", "LATENT",)
+    FUNCTION = "unet_extract_features"
 
     CATEGORY = "loaders"
 
-    def load_checkpoint(self, ckpt_name, output_vae=True, output_clip=True):
-        ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
-        out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
-        return out[:3]
+    def unet_extract_features(self, model,clip, feature_image):
+        
 
+        tokens = clip.tokenize("")
+        cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
+        model = model.clone()
+        unet = model.model
+        if model.model.in_channels()
+        unet.
+        self.inner_model, x, timestep, uncond, cond, cond_scale, model_options=model_options, seed=seed
+
+        
+        return model, feature_image
 
 
 NODE_CLASS_MAPPINGS = {
-    "OmsCheckpointLoaderSimple": OmsCheckpointLoaderSimple,
+    "Extract Features With Attention": ExtractFeaturesWithAttention,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "OmsCheckpointLoaderSimple": "Load OMS Checkpoint",
+    "Extract Features With Attention": "Extract Features With Attention",
 }
