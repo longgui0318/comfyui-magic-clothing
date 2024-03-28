@@ -72,9 +72,9 @@ class AdditionalFeaturesWithAttention:
     def copy_model(self, source_model, device=None):
         dtype = source_model.manual_cast_dtype if source_model.manual_cast_dtype is not None else source_model.get_dtype()
         workspace_path = os.path.join(os.path.dirname(__file__))
-        ref_unet = UNet2DConditionModel.from_pretrained("SG161222/Realistic_Vision_V4.0_noVAE", subfolder='unet', torch_dtype=dtype)
-        # config_dict = UNet2DConditionModel._dict_from_json_file(os.path.join(workspace_path, "unet_config/default_sd15.json"))
-        
+        # ref_unet = UNet2DConditionModel.load_config("SG161222/Realistic_Vision_V4.0_noVAE", subfolder='unet', torch_dtype=dtype)
+        config_dict = UNet2DConditionModel._dict_from_json_file(os.path.join(workspace_path, "unet_config/default_sd15.json"))
+        ref_unet = UNet2DConditionModel.from_config(config_dict,torch_dtype=dtype)
         # copyed_model = copy.deepcopy(source_model)
         return {}
     
