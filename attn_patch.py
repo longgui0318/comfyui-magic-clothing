@@ -30,27 +30,30 @@ class InputPatch:
             block_id = extra_options["block"][1]
             if block_name in attn_stored["block"] and block_id in attn_stored["block"][block_name]:
                 ref_q = attn_stored["block"][block_name][block_id]
-            if do_classifier_free_guidance:
-                empty_copy = torch.zeros_like(ref_q)
-                if enable_cloth_guidance:
-                    ref_q = torch.cat([empty_copy, ref_q, ref_q])
-                else:
-                    ref_q = torch.cat([empty_copy, ref_q])
-            q = torch.cat([q, ref_q], dim=1)
-            return (q,q,q)
+                if do_classifier_free_guidance:
+                    empty_copy = torch.zeros_like(ref_q)
+                    if enable_cloth_guidance:
+                        ref_q = torch.cat([empty_copy, ref_q, ref_q])
+                    else:
+                        ref_q = torch.cat([empty_copy, ref_q])
+                q = torch.cat([q, ref_q], dim=1)
+                return (q,q,q)
         return (q,k,v)
 
-class OutputPatch:
+class ReplacePatch:
     # forward for patching
     def __init__(self, type):
         self.type = type
  
-    def __call__(self, q, k, v, extra_options):
+    def __call__(self, q, extra_options):
         if "attn_stored" in extra_options:
             attn_stored = extra_options["attn_stored"]
         if attn_stored is None:
-            return (q,k,v)
+            return q
         if self.type == "restore":
              q, _ = torch.chunk(q, 2, dim=1)
-             return (q,q,q)
-        return (q,k,v)
+             return q
+        return q
+    
+    
+    
