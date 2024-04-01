@@ -18,48 +18,18 @@ import comfy.ldm.modules.diffusionmodules.openaimodel
 import comfy.utils
 import comfy.sample
 import comfy.samplers
+from safetensors import safe_open
 
-from diffusers import UNet2DConditionModel
+from diffusers import UNet2DConditionModel,UniPCMultistepScheduler, AutoencoderKL
+from diffusers.pipelines import StableDiffusionPipeline
 from comfy import model_detection
 from comfy import model_management
 from .utils import handle_block_info
-from .attn_patch import InputPatch, ReplacePatch
+from .attn_handler import InputPatch, ReplacePatch
 if hasattr(F, "scaled_dot_product_attention"):
     from .attn_handler import REFAttnProcessor2_0 as REFAttnProcessor
 else:
     from .attn_handler import REFAttnProcessor as REFAttnProcessor
-
-
-def text_encoder(clip, text):
-    tokens = clip.tokenize(text)
-    cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
-    return [[cond, {"pooled_output": pooled}]]
-
-
-class ExtractFeaturesWithUnet:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required":
-                {"model": ("MODEL",),
-                 "feature_image": ("LATENT", ),
-                 }
-                }
-    RETURN_TYPES = ("ATTN_STORED",)
-    FUNCTION = "extract_features"
-
-    CATEGORY = "loaders"
-
-    def extract_features(self, model, feature_image):
-        latent_image = feature_image["samples"]
-        dtype = torch.int32 if model.load_device.type == 'mps' else torch.int64
-        timesteps = torch.tensor([0], dtype=dtype, device=model.load_device)
-        transformer_options = model.model_options["transformer_options"]
-        transformer_options["attn_stored"] = {}
-        model.set_model_attn1_patch(InputPatch("save"))
-        _ = model.model.diffusion_model(
-            latent_image, timesteps, transformer_options=transformer_options,).float()
-        return (transformer_options["attn_stored"],)
-
 
 class AdditionalFeaturesWithAttention:
     @classmethod
@@ -67,14 +37,30 @@ class AdditionalFeaturesWithAttention:
         return {"required":
                 {"model": ("MODEL",),
                  "clip": ("CLIP", ),
-                 "feature_unet_name": (folder_paths.get_filename_list("unet"), ),
                  "feature_image": ("LATENT", ),
+                 "feature_unet_name": (folder_paths.get_filename_list("unet"), ),
+                 "do_classifier_free_guidance": ("BOOLEAN", {"default": True}),
+                 "enable_cloth_guidance": ("BOOLEAN", {"default": True}),
                  }
                 }
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "add_features"
 
     CATEGORY = "loaders"
+    
+    def add_features(self, model, clip, feature_image, feature_unet_name, do_classifier_free_guidance = True, enable_cloth_guidance = True):
+        attn_stored = self.calculate_features(model, clip, feature_unet_name, feature_image)
+        transformer_options = model.model_options["transformer_options"]
+        transformer_options["do_classifier_free_guidance"] = do_classifier_free_guidance
+        transformer_options["enable_cloth_guidance"] = enable_cloth_guidance
+        transformer_options["attn_stored"] = attn_stored
+        model = model.clone()
+        model.set_model_attn1_patch(InputPatch())
+        for block_name in attn_stored.keys():
+            for block_number  in attn_stored[block_name].keys():
+                for attention_index in attn_stored[block_name][block_number].keys():
+                    model.set_model_attn1_replace(ReplacePatch(),block_name,block_number,attention_index)
+        return (model,)
 
     def calculate_features(self, source_model, source_clip, feature_unet_name, feature_image):
         state_dict = source_model.model.diffusion_model.state_dict()
@@ -84,8 +70,13 @@ class AdditionalFeaturesWithAttention:
         offload_device = model_management.unet_offload_device()
         unet_path = folder_paths.get_full_path("unet", feature_unet_name)
         unet_file = comfy.utils.load_torch_file(unet_path,device=load_device)
+        detection_unet_config = model_detection.model_config_from_diffusers_unet(unet_file)
+        detection_unet_diffusers_keys = comfy.utils.unet_to_diffusers(detection_unet_config.unet_config)
         dtype = source_model.model.manual_cast_dtype if source_model.model.manual_cast_dtype is not None else source_model.model.get_dtype()
         workspace_path = os.path.join(os.path.dirname(__file__))
+        # vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(dtype=dtype)
+        # pipe = StableDiffusionPipeline.from_pretrained("SG161222/Realistic_Vision_V4.0_noVAE", vae=vae, torch_dtype=dtype)
+        # ref_unet = copy.deepcopy(pipe.unet)
         config_dict = UNet2DConditionModel._dict_from_json_file(os.path.join(workspace_path, "unet_config/default_sd15.json"))
         ref_unet = UNet2DConditionModel.from_config(config_dict, torch_dtype=dtype)
         ref_unet = ref_unet.to(load_device)
@@ -99,7 +90,12 @@ class AdditionalFeaturesWithAttention:
         attn_proces = {}
         for name in ref_unet.attn_processors.keys():
             if "attn1" in name and "motion_modules" not in name:
-                block_name,block_number,attention_index =handle_block_info(name)
+                block_name,block_number,attention_index = handle_block_info(name,detection_unet_diffusers_keys)
+            else:
+                block_name = None
+                block_number = 0
+                attention_index = 0
+            if block_name is not None:
                 attn_proces[name] = REFAttnProcessor(True,block_name,block_number,attention_index)
             else:
                 attn_proces[name] = REFAttnProcessor(False)
@@ -114,28 +110,12 @@ class AdditionalFeaturesWithAttention:
         del prompt_embeds_null
         latent_image = latent_image.to(offload_device)
         return attn_store
-    
-    def add_features(self, model, clip, feature_unet_name, feature_image):
-        attn_stored = self.calculate_features(model, clip, feature_unet_name, feature_image)
-        transformer_options = model.model_options["transformer_options"]
-        transformer_options["do_classifier_free_guidance"] = False
-        transformer_options["enable_cloth_guidance"] = False
-        transformer_options["attn_stored"] = attn_stored
-        model = model.clone()
-        model.set_model_attn1_patch(InputPatch())
-        for block_name in attn_stored.keys():
-            for block_number  in attn_stored[block_name].keys():
-                for attention_index in attn_stored[block_name][block_number].keys():
-                    model.set_model_attn1_replace(ReplacePatch(),block_name,block_number,attention_index)
-        return (model,)
 
 
 NODE_CLASS_MAPPINGS = {
-    "Extract Features With Unet": ExtractFeaturesWithUnet,
     "Additional Features With Attention": AdditionalFeaturesWithAttention,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Extract Features With Unet": "Extract Features With Unet",
     "Additional Features With Attention": "Additional Features With Attention",
 }
