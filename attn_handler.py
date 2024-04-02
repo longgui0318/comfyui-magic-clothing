@@ -77,7 +77,7 @@ class InputPatch:
             return (q,k,v)
         if "block" not in attn_stored:
             attn_stored["block"] = {}
-        do_classifier_free_guidance = extra_options["do_classifier_free_guidance"]
+        do_classifier_free_guidance = False
         enable_cloth_guidance = extra_options["enable_cloth_guidance"]
         block_name = extra_options["block"][0]
         block_id = extra_options["block"][1]

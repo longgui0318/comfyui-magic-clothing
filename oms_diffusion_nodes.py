@@ -39,7 +39,6 @@ class AdditionalFeaturesWithAttention:
                  "clip": ("CLIP", ),
                  "feature_image": ("LATENT", ),
                  "feature_unet_name": (folder_paths.get_filename_list("unet"), ),
-                 "do_classifier_free_guidance": ("BOOLEAN", {"default": True}),
                  "enable_cloth_guidance": ("BOOLEAN", {"default": True}),
                  }
                 }
@@ -48,10 +47,9 @@ class AdditionalFeaturesWithAttention:
 
     CATEGORY = "loaders"
     
-    def add_features(self, model, clip, feature_image, feature_unet_name, do_classifier_free_guidance = True, enable_cloth_guidance = True):
+    def add_features(self, model, clip, feature_image, feature_unet_name, enable_cloth_guidance = True):
         attn_stored = self.calculate_features(model, clip, feature_unet_name, feature_image)
         transformer_options = model.model_options["transformer_options"]
-        transformer_options["do_classifier_free_guidance"] = do_classifier_free_guidance
         transformer_options["enable_cloth_guidance"] = enable_cloth_guidance
         transformer_options["attn_stored"] = attn_stored
         model = model.clone()
@@ -63,9 +61,6 @@ class AdditionalFeaturesWithAttention:
         return (model,)
 
     def calculate_features(self, source_model, source_clip, feature_unet_name, feature_image):
-        state_dict = source_model.model.diffusion_model.state_dict()
-        for _key in state_dict.keys():
-            print("source_model",_key,state_dict[_key].shape)
         load_device = model_management.get_torch_device()
         offload_device = model_management.unet_offload_device()
         unet_path = folder_paths.get_full_path("unet", feature_unet_name)
@@ -81,11 +76,7 @@ class AdditionalFeaturesWithAttention:
         ref_unet = UNet2DConditionModel.from_config(config_dict, torch_dtype=dtype)
         ref_unet = ref_unet.to(load_device)
         ref_unet.load_state_dict(unet_file, strict=False)
-        
-        state_dict = ref_unet.state_dict()
-        for _key in state_dict.keys():
-            print("ref_unet",_key,state_dict[_key].shape)
-        
+
         attn_store = {}
         attn_proces = {}
         for name in ref_unet.attn_processors.keys():
