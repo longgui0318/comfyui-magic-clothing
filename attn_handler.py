@@ -75,8 +75,6 @@ class InputPatch:
             attn_stored = extra_options["attn_stored"]
         if attn_stored is None:
             return (q,k,v)
-        if "block" not in attn_stored:
-            attn_stored["block"] = {}
         do_classifier_free_guidance = False
         enable_cloth_guidance = extra_options["enable_cloth_guidance"]
         block_name = extra_options["block"][0]
@@ -90,7 +88,7 @@ class InputPatch:
                     ref_q = torch.cat([empty_copy, ref_q, ref_q])
                 else:
                     ref_q = torch.cat([empty_copy, ref_q])
-            q = torch.cat([q, ref_q], dim=1)
+            q = torch.cat([q, ref_q], dim=1)#参与计算
             return (q,q,q)
         return (q,k,v)
 
@@ -105,5 +103,6 @@ class ReplacePatch:
             attn_stored = extra_options["attn_stored"]
         if attn_stored is None:
             return q
-        q, _ = torch.chunk(q, 2, dim=1)
+        q, _ = torch.chunk(q, 2, dim=1)#抹除额外内容
+        #对于整体的如何呢
         return q
