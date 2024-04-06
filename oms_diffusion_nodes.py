@@ -25,7 +25,7 @@ from diffusers.pipelines import StableDiffusionPipeline
 from comfy import model_detection
 from comfy import model_management
 from .utils import handle_block_info
-from .attn_handler import InputPatch, ReplacePatch
+from .attn_handler import InputPatch, ReplacePatch,UnetFunctionWrapper,SamplerCfgFunctionWrapper
 if hasattr(F, "scaled_dot_product_attention"):
     from .attn_handler import REFAttnProcessor2_0 as REFAttnProcessor
 else:
@@ -39,8 +39,8 @@ class AdditionalFeaturesWithAttention:
                  "clip": ("CLIP", ),
                  "feature_image": ("LATENT", ),
                  "feature_unet_name": (folder_paths.get_filename_list("unet"), ),
-                 "enable_cloth_guidance": ("BOOLEAN", {"default": True}),
-                 "cloth_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
+                 "enable_feature_guidance": ("BOOLEAN", {"default": True}),
+                 "feature_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
                  }
                 }
     RETURN_TYPES = ("MODEL",)
@@ -48,14 +48,16 @@ class AdditionalFeaturesWithAttention:
 
     CATEGORY = "loaders"
     
-    def add_features(self, model, clip, feature_image, feature_unet_name, enable_cloth_guidance = True,cloth_guidance_scale = 2.5):
+    def add_features(self, model, clip, feature_image, feature_unet_name, enable_feature_guidance = True,feature_guidance_scale = 2.5):
         attn_stored = self.calculate_features(model, clip, feature_unet_name, feature_image)
         transformer_options = model.model_options["transformer_options"]
-        transformer_options["enable_cloth_guidance"] = enable_cloth_guidance
-        transformer_options["cloth_guidance_scale"] = cloth_guidance_scale
         transformer_options["attn_stored"] = {}
+        transformer_options["attn_stored"]["enable_feature_guidance"] = enable_feature_guidance
+        transformer_options["attn_stored"]["feature_guidance_scale"] = feature_guidance_scale
         transformer_options["attn_stored"]["data"] = attn_stored
         model = model.clone()
+        model.set_model_unet_function_wrapper(UnetFunctionWrapper())
+        model.set_model_sampler_cfg_function(SamplerCfgFunctionWrapper())
         model.set_model_attn1_patch(InputPatch())
         for block_name in attn_stored.keys():
             for block_number  in attn_stored[block_name].keys():
@@ -65,21 +67,20 @@ class AdditionalFeaturesWithAttention:
         return (model,)
 
     def inject_comfyui(self):
-        old_cfg_take = comfy.samplers.CFGNoisePredictor.apply_model
-        def apply_model(self, *args, **kwargs):
+        old_sampling_function = comfy.samplers.sampling_function
+        def sampling_function(self, *args, **kwargs):
             if "model_options" in kwargs:
                 model_options = kwargs["model_options"]
                 transformer_options = model_options["transformer_options"]
                 if "attn_stored" in transformer_options:
                     cond_scale = kwargs.get("cond_scale", None)
-                    if cond_scale is None and len(args) > 4:
-                        cond_scale = args[4]
+                    if cond_scale is None and len(args) > 5:
+                        cond_scale = args[5]
                     attn_stored = transformer_options["attn_stored"]
                     attn_stored["cond_scale"] = cond_scale
-                    attn_stored["disable_cfg1_optimization"] = model_options.get(
-                        "disable_cfg1_optimization", False)
-            return old_cfg_take(self, *args, **kwargs)
-        comfy.samplers.CFGNoisePredictor.apply_model = apply_model
+                    attn_stored["disable_cfg1_optimization"] = model_options.get("disable_cfg1_optimization", False)
+            return old_sampling_function(self, *args, **kwargs)
+        comfy.samplers.sampling_function.apply_model = sampling_function
 
     def calculate_features(self, source_model, source_clip, feature_unet_name, feature_image):
         load_device = model_management.get_torch_device()
