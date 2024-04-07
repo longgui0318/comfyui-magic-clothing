@@ -66,7 +66,7 @@ class AdditionalFeaturesWithAttention:
         self.inject_comfyui()
         return (model,)
 
-    def inject_comfyui(self):
+    def inject_comfyui(self,attn_stored_ref):
         old_sampling_function = comfy.samplers.sampling_function
         def sampling_function(self, *args, **kwargs):
             if "model_options" in kwargs:
@@ -80,7 +80,24 @@ class AdditionalFeaturesWithAttention:
                     attn_stored["cond_scale"] = cond_scale
                     attn_stored["disable_cfg1_optimization"] = model_options.get("disable_cfg1_optimization", False)
             return old_sampling_function(self, *args, **kwargs)
-        comfy.samplers.sampling_function.apply_model = sampling_function
+        comfy.samplers.sampling_function = sampling_function
+        
+        old_get_area_and_mult = comfy.samplers.get_area_and_mult
+        def get_area_and_mult(self, *args, **kwargs):
+            result = old_get_area_and_mult(self, *args, **kwargs)
+            mult = result.get("mult", None)
+            area = result.get("area", None)
+            input_x = result.get("input_x", None)
+            if attn_stored_ref is not None :
+                if "input_x_extra_options" not in attn_stored_ref:
+                    attn_stored_ref["input_x_extra_options"] = []
+                attn_stored_ref["input_x_extra_options"].append({
+                    "input_x":input_x,
+                    "mult":mult,
+                    "area":area
+                })
+            return result
+        comfy.samplers.get_area_and_mult = get_area_and_mult
 
     def calculate_features(self, source_model, source_clip, feature_unet_name, feature_image):
         load_device = model_management.get_torch_device()

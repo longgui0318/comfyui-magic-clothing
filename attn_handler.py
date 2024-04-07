@@ -93,6 +93,8 @@ class UnetFunctionWrapper:
         if "attn_stored" in transformer_options:
             attn_stored = transformer_options["attn_stored"]
             enable_feature_guidance = attn_stored["enable_feature_guidance"]
+            input_x_extra_options = attn_stored["input_x_extra_options"]
+            un_handle_input_x_index =  list(range(len(input_x_extra_options)))
             cond_or_uncond = parameters["cond_or_uncond"]
             cond_or_uncond_replenishment = []
             #对传入参数进行调整，调整方式如下
@@ -116,6 +118,16 @@ class UnetFunctionWrapper:
                 new_c_crossattn = []
             for i in range(len(input_array)):
                 cond_flag = cond_or_uncond[i] # 需注意，3月底comfyui更新，为了支持多conds实现，移除了cond本身的判定，这个值存的是index
+                find_input_x_index = None
+                for un_handle_input_x_i in un_handle_input_x_index:
+                    un_handle_input_x_item = un_handle_input_x_index[un_handle_input_x_i]
+                    un_handle_input_x_item_input_x = un_handle_input_x_item["input_x"]
+                    if torch.eq(input_array[i],un_handle_input_x_item_input_x).all():
+                        find_input_x_index = un_handle_input_x_i
+                        break
+                find_input_x = None
+                if find_input_x_index is not None:
+                    find_input_x = un_handle_input_x_index[find_input_x_index]["input_x"]
                 new_input_array.append(input_array[i])
                 new_timestep.append(timestep_array[i])
                 if c_concat_array is not None:
