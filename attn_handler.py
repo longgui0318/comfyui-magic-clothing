@@ -70,17 +70,27 @@ class REFAttnProcessor2_0(AttnProcessor2_0):
         )
         
 class SamplerCfgFunctionWrapper:
-    
-    def is_oms_mode(self,model_options):
-        transformer_options = model_options["transformer_options"]
-        return "attn_stored" in transformer_options
-    
+        
     def __call__(self, parameters) -> Any:
         cond = parameters["cond"]
         uncond = parameters["uncond"]
         cond_scale = parameters["cond_scale"]
-        if self.is_oms_mode(parameters["model_options"]):
-            return cond - uncond
+        model_options = parameters["model_options"]
+        transformer_options = model_options["transformer_options"]
+        if "attn_stored" in transformer_options:
+            attn_stored = transformer_options["attn_stored"]
+            feature_guidance_scale = attn_stored["feature_guidance_scale"]
+            cond_or_uncond_out_cond = attn_stored["cond_or_uncond_out_cond"]
+            cond_or_uncond_out_count = attn_stored["cond_or_uncond_out_count"]
+            if  cond_or_uncond_out_cond is None:
+                return uncond + (cond - uncond) * cond_scale
+            else:
+                cond_or_uncond_out_cond /= cond_or_uncond_out_count
+                return (
+                    uncond
+                    + cond_scale * (cond - cond_or_uncond_out_cond)
+                    + feature_guidance_scale * (cond_or_uncond_out_cond - cond_scale)
+                )
         else:
             return uncond + (cond - uncond) * cond_scale
         
@@ -108,6 +118,7 @@ class UnetFunctionWrapper:
             new_c_crossattn = None
             c_concat_array = None
             c_crossattn_array = None
+            cond_or_uncond_extra_options = {}
             if "c_concat" in c:
                 c_concat = c["c_concat"]
                 c_concat_array = torch.chunk(c_concat,c_concat.shape[0])
@@ -125,9 +136,12 @@ class UnetFunctionWrapper:
                     if torch.eq(input_array[i],un_handle_input_x_item_input_x).all():
                         find_input_x_index = un_handle_input_x_i
                         break
-                find_input_x = None
+                find_input_x_mult = None
+                find_input_x_area = None
                 if find_input_x_index is not None:
-                    find_input_x = un_handle_input_x_index[find_input_x_index]["input_x"]
+                    del un_handle_input_x_index[find_input_x_index]
+                    find_input_x_mult = un_handle_input_x_index[find_input_x_index]["mult"]
+                    find_input_x_area = un_handle_input_x_index[find_input_x_index]["area"]
                 new_input_array.append(input_array[i])
                 new_timestep.append(timestep_array[i])
                 if c_concat_array is not None:
@@ -136,6 +150,10 @@ class UnetFunctionWrapper:
                     new_c_crossattn.append(c_crossattn_array[i])
                 cond_or_uncond_replenishment.append(1 if cond_flag == 1 else 0)
                 if enable_feature_guidance and cond_flag == 1:
+                    cond_or_uncond_extra_options[i]={
+                        "mult":find_input_x_mult,
+                        "area":find_input_x_area
+                    }
                     cond_or_uncond_replenishment.append(2)# 注意，在启用特征引导的时候，需要增加一个负向空特征来处理，这个复制的负向特征是给后面计算空特征用的
                     new_input_array.append(input_array[i])
                     new_timestep.append(timestep_array[i])
@@ -149,7 +167,12 @@ class UnetFunctionWrapper:
                 c["c_concat"] = torch.cat(new_c_concat,)
             if new_c_crossattn is not None:
                 c["c_crossattn"] = torch.cat(new_c_crossattn,)
+            if "out_cond_init" not in attn_stored:
+                attn_stored["out_cond_init"] = torch.zeros_like(input_array[0])
+            if "out_count_init" not in attn_stored:
+                attn_stored["out_count_init"] = torch.zeros_like(input_array[0] * 1e-37)
             attn_stored["cond_or_uncond_replenishment"] = cond_or_uncond_replenishment
+            attn_stored["cond_or_uncond_extra_options"] = cond_or_uncond_extra_options
             
             #直接清理，节省内存
             del input_array
@@ -160,26 +183,34 @@ class UnetFunctionWrapper:
             del new_c_crossattn
             del c_concat_array
             del c_crossattn_array 
+            del cond_or_uncond_extra_options
         
         output = apply_model(input,timestep,**c)
         if "attn_stored" in transformer_options:
             attn_stored = transformer_options["attn_stored"]
             enable_feature_guidance = attn_stored["enable_feature_guidance"]
-            feature_guidance_scale = attn_stored["feature_guidance_scale"]
-            cond_scale = attn_stored["cond_scale"]
-            disable_cfg1_optimization = attn_stored["disable_cfg1_optimization"]            
+         
             cond_or_uncond_replenishment = attn_stored["cond_or_uncond_replenishment"]
-            # 根据oms的特征处理公式，简化成a-b的模式 同上面SamplerCfgFunctionWrapper的包装处理
-            # 令空特征 结果为 nEqp 负向特征 结果为 nRqp 正向特征 结果为 pRqp 
-            # 最终结果为 ( nEqp+cond_scale*pRqp + feature_guidance_scale*nRqp ) - ( cond_scale*nRqp + feature_guidance_scale * nEqp)
+            cond_or_uncond_extra_options = attn_stored["cond_or_uncond_extra_options"]
             pred_result = torch.chunk(output,len(cond_or_uncond_replenishment))
-            nEqp = None
-            nRqp = None
-            pRqp = None
+            need_remove = []
             for i in range(len(cond_or_uncond_replenishment)):
                 cond_flag = cond_or_uncond_replenishment[i]
-                
-        # 输出数据，首选，根据是否为负向提示词，是，提取出前面的计算量，并缓存保存
+                if cond_flag == 2:
+                    need_remove.append(i)
+                    cond_or_uncond_extra_option = cond_or_uncond_extra_options[i]
+                    if "cond_or_uncond_out_cond" not in attn_stored:
+                        attn_stored["cond_or_uncond_out_cond"] = attn_stored["out_cond_init"]
+                    if "cond_or_uncond_out_count" not in attn_stored:
+                        attn_stored["cond_or_uncond_out_count"] = attn_stored["out_count_init"]
+                    mult = cond_or_uncond_extra_option["mult"]
+                    area = cond_or_uncond_extra_option["area"]
+                    
+                    attn_stored["cond_or_uncond_out_cond"][:,:,area[2]:area[0] + area[2],area[3]:area[1] + area[3]] += pred_result[i] * mult
+                    attn_stored["cond_or_uncond_out_count"][:,:,area[2]:area[0] + area[2],area[3]:area[1] + area[3]] += mult
+            for i in need_remove:
+                del  pred_result[i]
+            output = torch.cat(output)
         return output
 
 class InputPatch:

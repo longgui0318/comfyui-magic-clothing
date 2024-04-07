@@ -1,10 +1,5 @@
 import os
-import torch
 import torch.nn.functional as F
-import copy
-import inspect
-import logging
-import uuid
 import folder_paths
 
 import comfy.ops
@@ -18,10 +13,8 @@ import comfy.ldm.modules.diffusionmodules.openaimodel
 import comfy.utils
 import comfy.sample
 import comfy.samplers
-from safetensors import safe_open
 
-from diffusers import UNet2DConditionModel,UniPCMultistepScheduler, AutoencoderKL
-from diffusers.pipelines import StableDiffusionPipeline
+from diffusers import UNet2DConditionModel
 from comfy import model_detection
 from comfy import model_management
 from .utils import handle_block_info
@@ -49,45 +42,31 @@ class AdditionalFeaturesWithAttention:
     CATEGORY = "loaders"
     
     def add_features(self, model, clip, feature_image, feature_unet_name, enable_feature_guidance = True,feature_guidance_scale = 2.5):
-        attn_stored = self.calculate_features(model, clip, feature_unet_name, feature_image)
+        attn_stored_data = self.calculate_features(model, clip, feature_unet_name, feature_image)
         transformer_options = model.model_options["transformer_options"]
-        transformer_options["attn_stored"] = {}
-        transformer_options["attn_stored"]["enable_feature_guidance"] = enable_feature_guidance
-        transformer_options["attn_stored"]["feature_guidance_scale"] = feature_guidance_scale
-        transformer_options["attn_stored"]["data"] = attn_stored
+        attn_stored = {}
+        attn_stored["enable_feature_guidance"] = enable_feature_guidance
+        attn_stored["feature_guidance_scale"] = feature_guidance_scale
+        attn_stored["data"] = attn_stored_data
         model = model.clone()
         model.set_model_unet_function_wrapper(UnetFunctionWrapper())
         model.set_model_sampler_cfg_function(SamplerCfgFunctionWrapper())
         model.set_model_attn1_patch(InputPatch())
-        for block_name in attn_stored.keys():
-            for block_number  in attn_stored[block_name].keys():
-                for attention_index in attn_stored[block_name][block_number].keys():
+        for block_name in attn_stored_data.keys():
+            for block_number  in attn_stored_data[block_name].keys():
+                for attention_index in attn_stored_data[block_name][block_number].keys():
                     model.set_model_attn1_replace(ReplacePatch(),block_name,block_number,attention_index)
-        self.inject_comfyui()
+        self.inject_comfyui(attn_stored)
+        transformer_options["attn_stored"]=attn_stored
         return (model,)
 
-    def inject_comfyui(self,attn_stored_ref):
-        old_sampling_function = comfy.samplers.sampling_function
-        def sampling_function(self, *args, **kwargs):
-            if "model_options" in kwargs:
-                model_options = kwargs["model_options"]
-                transformer_options = model_options["transformer_options"]
-                if "attn_stored" in transformer_options:
-                    cond_scale = kwargs.get("cond_scale", None)
-                    if cond_scale is None and len(args) > 5:
-                        cond_scale = args[5]
-                    attn_stored = transformer_options["attn_stored"]
-                    attn_stored["cond_scale"] = cond_scale
-                    attn_stored["disable_cfg1_optimization"] = model_options.get("disable_cfg1_optimization", False)
-            return old_sampling_function(self, *args, **kwargs)
-        comfy.samplers.sampling_function = sampling_function
-        
+    def inject_comfyui(self,attn_stored_ref):       
         old_get_area_and_mult = comfy.samplers.get_area_and_mult
         def get_area_and_mult(self, *args, **kwargs):
             result = old_get_area_and_mult(self, *args, **kwargs)
-            mult = result.get("mult", None)
-            area = result.get("area", None)
-            input_x = result.get("input_x", None)
+            mult = result[1]
+            area = result[3]
+            input_x = result[0]
             if attn_stored_ref is not None :
                 if "input_x_extra_options" not in attn_stored_ref:
                     attn_stored_ref["input_x_extra_options"] = []
@@ -108,9 +87,6 @@ class AdditionalFeaturesWithAttention:
         detection_unet_diffusers_keys = comfy.utils.unet_to_diffusers(detection_unet_config.unet_config)
         dtype = source_model.model.manual_cast_dtype if source_model.model.manual_cast_dtype is not None else source_model.model.get_dtype()
         workspace_path = os.path.join(os.path.dirname(__file__))
-        # vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(dtype=dtype)
-        # pipe = StableDiffusionPipeline.from_pretrained("SG161222/Realistic_Vision_V4.0_noVAE", vae=vae, torch_dtype=dtype)
-        # ref_unet = copy.deepcopy(pipe.unet)
         config_dict = UNet2DConditionModel._dict_from_json_file(os.path.join(workspace_path, "unet_config/default_sd15.json"))
         ref_unet = UNet2DConditionModel.from_config(config_dict, torch_dtype=dtype)
         ref_unet = ref_unet.to(load_device)
