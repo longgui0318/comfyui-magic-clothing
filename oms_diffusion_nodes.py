@@ -43,7 +43,6 @@ class AdditionalFeaturesWithAttention:
     
     def add_features(self, model, clip, feature_image, feature_unet_name, enable_feature_guidance = True,feature_guidance_scale = 2.5):
         attn_stored_data = self.calculate_features(model, clip, feature_unet_name, feature_image)
-        transformer_options = model.model_options["transformer_options"]
         attn_stored = {}
         attn_stored["enable_feature_guidance"] = enable_feature_guidance
         attn_stored["feature_guidance_scale"] = feature_guidance_scale
@@ -57,7 +56,7 @@ class AdditionalFeaturesWithAttention:
                 for attention_index in attn_stored_data[block_name][block_number].keys():
                     model.set_model_attn1_replace(ReplacePatch(),block_name,block_number,attention_index)
         self.inject_comfyui(attn_stored)
-        transformer_options["attn_stored"]=attn_stored
+        model.model_options["transformer_options"]["attn_stored"] = attn_stored
         return (model,)
 
     def inject_comfyui(self,attn_stored_ref):       

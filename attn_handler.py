@@ -104,7 +104,7 @@ class UnetFunctionWrapper:
             attn_stored = transformer_options["attn_stored"]
             enable_feature_guidance = attn_stored["enable_feature_guidance"]
             input_x_extra_options = attn_stored["input_x_extra_options"]
-            un_handle_input_x_index =  list(range(len(input_x_extra_options)))
+            fined_nput_x_extra_option_indexs =  []
             cond_or_uncond = parameters["cond_or_uncond"]
             cond_or_uncond_replenishment = []
             #对传入参数进行调整，调整方式如下
@@ -129,19 +129,14 @@ class UnetFunctionWrapper:
                 new_c_crossattn = []
             for i in range(len(input_array)):
                 cond_flag = cond_or_uncond[i] # 需注意，3月底comfyui更新，为了支持多conds实现，移除了cond本身的判定，这个值存的是index
-                find_input_x_index = None
-                for un_handle_input_x_i in un_handle_input_x_index:
-                    un_handle_input_x_item = un_handle_input_x_index[un_handle_input_x_i]
-                    un_handle_input_x_item_input_x = un_handle_input_x_item["input_x"]
-                    if torch.eq(input_array[i],un_handle_input_x_item_input_x).all():
-                        find_input_x_index = un_handle_input_x_i
+                fined_nput_x_extra_option = None
+                for input_x_extra_i in range(len(input_x_extra_options)):
+                    if input_x_extra_i in fined_nput_x_extra_option_indexs:
+                        continue
+                    fined_nput_x_extra_option_indexs.append(input_x_extra_i)
+                    if torch.eq(input_array[i],input_x_extra_options[input_x_extra_i]["input_x"]).all():
+                        fined_nput_x_extra_option = input_x_extra_options[input_x_extra_i]
                         break
-                find_input_x_mult = None
-                find_input_x_area = None
-                if find_input_x_index is not None:
-                    del un_handle_input_x_index[find_input_x_index]
-                    find_input_x_mult = un_handle_input_x_index[find_input_x_index]["mult"]
-                    find_input_x_area = un_handle_input_x_index[find_input_x_index]["area"]
                 new_input_array.append(input_array[i])
                 new_timestep.append(timestep_array[i])
                 if c_concat_array is not None:
@@ -150,9 +145,9 @@ class UnetFunctionWrapper:
                     new_c_crossattn.append(c_crossattn_array[i])
                 cond_or_uncond_replenishment.append(1 if cond_flag == 1 else 0)
                 if enable_feature_guidance and cond_flag == 1:
-                    cond_or_uncond_extra_options[i]={
-                        "mult":find_input_x_mult,
-                        "area":find_input_x_area
+                    cond_or_uncond_extra_options[i+1]={
+                        "mult":fined_nput_x_extra_option["mult"] if fined_nput_x_extra_option is not None else None,
+                        "area":fined_nput_x_extra_option["area"] if fined_nput_x_extra_option is not None else None
                     }
                     cond_or_uncond_replenishment.append(2)# 注意，在启用特征引导的时候，需要增加一个负向空特征来处理，这个复制的负向特征是给后面计算空特征用的
                     new_input_array.append(input_array[i])
@@ -184,6 +179,8 @@ class UnetFunctionWrapper:
             del c_concat_array
             del c_crossattn_array 
             del cond_or_uncond_extra_options
+            for i in range(len(fined_nput_x_extra_option_indexs)):
+                del input_x_extra_options[fined_nput_x_extra_option_indexs[i]]
         
         output = apply_model(input,timestep,**c)
         if "attn_stored" in transformer_options:
@@ -193,11 +190,10 @@ class UnetFunctionWrapper:
             cond_or_uncond_replenishment = attn_stored["cond_or_uncond_replenishment"]
             cond_or_uncond_extra_options = attn_stored["cond_or_uncond_extra_options"]
             pred_result = torch.chunk(output,len(cond_or_uncond_replenishment))
-            need_remove = []
+            new_output = []
             for i in range(len(cond_or_uncond_replenishment)):
                 cond_flag = cond_or_uncond_replenishment[i]
                 if cond_flag == 2:
-                    need_remove.append(i)
                     cond_or_uncond_extra_option = cond_or_uncond_extra_options[i]
                     if "cond_or_uncond_out_cond" not in attn_stored:
                         attn_stored["cond_or_uncond_out_cond"] = attn_stored["out_cond_init"]
@@ -208,9 +204,9 @@ class UnetFunctionWrapper:
                     
                     attn_stored["cond_or_uncond_out_cond"][:,:,area[2]:area[0] + area[2],area[3]:area[1] + area[3]] += pred_result[i] * mult
                     attn_stored["cond_or_uncond_out_count"][:,:,area[2]:area[0] + area[2],area[3]:area[1] + area[3]] += mult
-            for i in need_remove:
-                del  pred_result[i]
-            output = torch.cat(output)
+                else:
+                    new_output.append(pred_result[i])
+            output = torch.cat(new_output)
         return output
 
 class InputPatch:
