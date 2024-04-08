@@ -228,6 +228,7 @@ class InputPatch:
         block_id = extra_options["block"][1]
         block_index = extra_options["block_index"]
         if block_name in attn_stored_data and block_id in attn_stored_data[block_name] and block_index in attn_stored_data[block_name][block_id]:
+            q_in = q
             feature_hidden_states = attn_stored_data[block_name][block_id][block_index]
             feature_hidden_states = feature_hidden_states.to(q.dtype)
             combo_feature_hidden_states = []
@@ -241,6 +242,8 @@ class InputPatch:
                     combo_feature_hidden_states.append(empty_feature)
             feature_hidden_states = torch.cat(combo_feature_hidden_states)
             q = torch.cat([q, feature_hidden_states], dim=1)
+            print("OMS_TEST input [q_in]",q_in.shape)
+            print("OMS_TEST input [q_out]",q.shape)
             return (q,q,q)
         return (q,k,v)
 
@@ -255,6 +258,9 @@ class ReplacePatch:
             attn_stored = extra_options["attn_stored"]
         if attn_stored is None:
             return q
+        q_in = q
         q, _ = torch.chunk(q, 2, dim=1)#抹除额外内容
         #对于整体的如何呢
+        print("OMS_TEST replace [q_in]",q_in.shape)
+        print("OMS_TEST replace [q_out]",q.shape)
         return q
