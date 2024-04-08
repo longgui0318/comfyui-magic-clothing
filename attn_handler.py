@@ -4,7 +4,7 @@ from typing import Any, Optional
 import torch.nn.functional as F
 from diffusers.models.attention_processor import Attention, AttnProcessor, AttnProcessor2_0
 from comfy.ldm.modules.attention import optimized_attention
-from .utils import save_attn
+from .utils import save_attn,clean_attn_stored_memory
 
 class REFAttnProcessor(AttnProcessor):
     def __init__(self,need_save=True,block_name=None,block_number=None,attention_index=None):
@@ -82,6 +82,10 @@ class SamplerCfgFunctionWrapper:
             feature_guidance_scale = attn_stored["feature_guidance_scale"]
             cond_or_uncond_out_cond = attn_stored["cond_or_uncond_out_cond"]
             cond_or_uncond_out_count = attn_stored["cond_or_uncond_out_count"]
+            #clear memory
+            clean_attn_stored_memory(attn_stored)
+            
+            
             if  cond_or_uncond_out_cond is None:
                 return uncond + (cond - uncond) * cond_scale
             else:
@@ -179,7 +183,7 @@ class UnetFunctionWrapper:
             del c_concat_array
             del c_crossattn_array 
             del cond_or_uncond_extra_options
-            for i in range(len(fined_nput_x_extra_option_indexs)):
+            for i in range(len(fined_nput_x_extra_option_indexs)- 1, -1, -1):
                 del input_x_extra_options[fined_nput_x_extra_option_indexs[i]]
         
         output = apply_model(input,timestep,**c)
@@ -207,6 +211,8 @@ class UnetFunctionWrapper:
                 else:
                     new_output.append(pred_result[i])
             output = torch.cat(new_output)
+            del new_output
+            del pred_result
         return output
 
 class InputPatch:

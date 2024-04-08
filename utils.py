@@ -35,3 +35,16 @@ def save_attn(value, attn_store, block_name, block_number, attention_index):
     if block_number not in attn_store[block_name]:
         attn_store[block_name][block_number] = {}
     attn_store[block_name][block_number][attention_index] = value
+    
+def clean_attn_stored_memory(attn_stored):
+    del_key_if_exists(attn_stored,"cond_or_uncond_out_cond")
+    del_key_if_exists(attn_stored,"cond_or_uncond_out_count")
+    del_key_if_exists(attn_stored,"input_x_extra_options")
+    del_key_if_exists(attn_stored,"out_cond_init")
+    del_key_if_exists(attn_stored,"out_count_init")
+    del_key_if_exists(attn_stored,"cond_or_uncond_replenishment")
+    del_key_if_exists(attn_stored,"cond_or_uncond_extra_options")
+    
+def del_key_if_exists(obj,key):
+    if key in obj:
+        del obj[key]

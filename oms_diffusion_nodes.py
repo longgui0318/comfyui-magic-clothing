@@ -17,7 +17,7 @@ import comfy.samplers
 from diffusers import UNet2DConditionModel
 from comfy import model_detection
 from comfy import model_management
-from .utils import handle_block_info
+from .utils import handle_block_info,clean_attn_stored_memory
 from .attn_handler import InputPatch, ReplacePatch,UnetFunctionWrapper,SamplerCfgFunctionWrapper
 if hasattr(F, "scaled_dot_product_attention"):
     from .attn_handler import REFAttnProcessor2_0 as REFAttnProcessor
@@ -67,6 +67,18 @@ class AdditionalFeaturesWithAttention:
             area = result[3]
             input_x = result[0]
             if attn_stored_ref is not None :
+                check_key = ["cond_or_uncond_out_cond"
+                             ,"cond_or_uncond_out_uncond"
+                             ,"out_cond_init"
+                             ,"out_count_init"
+                             ,"cond_or_uncond_extra_options"
+                             ,"cond_or_uncond_replenishment"]
+                need_clean_memory = False
+                for key in check_key:
+                    if key in attn_stored_ref:
+                        need_clean_memory = True
+                if need_clean_memory:
+                    clean_attn_stored_memory(attn_stored_ref)
                 if "input_x_extra_options" not in attn_stored_ref:
                     attn_stored_ref["input_x_extra_options"] = []
                 attn_stored_ref["input_x_extra_options"].append({
