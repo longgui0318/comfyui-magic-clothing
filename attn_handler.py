@@ -74,6 +74,7 @@ class SamplerCfgFunctionWrapper:
     def __call__(self, parameters) -> Any:
         cond = parameters["cond"]
         uncond = parameters["uncond"]
+        input_x = parameters["input"]
         cond_scale = parameters["cond_scale"]
         model_options = parameters["model_options"]
         transformer_options = model_options["transformer_options"]
@@ -84,12 +85,13 @@ class SamplerCfgFunctionWrapper:
             cond_or_uncond_out_count = attn_stored["cond_or_uncond_out_count"]
             #clear memory
             clean_attn_stored_memory(attn_stored)
-            
             if  cond_or_uncond_out_cond is None:
                 return uncond + (cond - uncond) * cond_scale
             else:
+                cond = input_x - cond
+                uncond = input_x - uncond
                 cond_or_uncond_out_cond /= cond_or_uncond_out_count
-                return (
+                return input_x - (
                     uncond
                     + cond_scale * (cond - cond_or_uncond_out_cond)
                     + feature_guidance_scale * (cond_or_uncond_out_cond - uncond)
