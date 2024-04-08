@@ -85,7 +85,6 @@ class SamplerCfgFunctionWrapper:
             #clear memory
             clean_attn_stored_memory(attn_stored)
             
-            
             if  cond_or_uncond_out_cond is None:
                 return uncond + (cond - uncond) * cond_scale
             else:
@@ -93,7 +92,7 @@ class SamplerCfgFunctionWrapper:
                 return (
                     uncond
                     + cond_scale * (cond - cond_or_uncond_out_cond)
-                    + feature_guidance_scale * (cond_or_uncond_out_cond - cond_scale)
+                    + feature_guidance_scale * (cond_or_uncond_out_cond - uncond)
                 )
         else:
             return uncond + (cond - uncond) * cond_scale
