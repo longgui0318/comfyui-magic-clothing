@@ -229,6 +229,9 @@ class InputPatch:
         block_id = extra_options["block"][1]
         block_index = extra_options["block_index"]
         if block_name in attn_stored_data and block_id in attn_stored_data[block_name] and block_index in attn_stored_data[block_name][block_id]:
+            FLAG_OUT_CHANNEL = 2
+            qEQk = q.shape[FLAG_OUT_CHANNEL] == k.shape[FLAG_OUT_CHANNEL]
+            qEQv = q.shape[FLAG_OUT_CHANNEL] == v.shape[FLAG_OUT_CHANNEL]
             feature_hidden_states = attn_stored_data[block_name][block_id][block_index]
             if q.shape[1] != feature_hidden_states.shape[1]:
                 clean_attn_stored_memory(attn_stored)
@@ -245,7 +248,7 @@ class InputPatch:
                     combo_feature_hidden_states.append(empty_feature)
             feature_hidden_states = torch.cat(combo_feature_hidden_states)
             q = torch.cat([q, feature_hidden_states], dim=1)
-            return (q,q,q)
+            return (q,q if qEQk else k,q if qEQv else v)
         return (q,k,v)
 
 class ReplacePatch:
