@@ -51,10 +51,12 @@ class AdditionalFeaturesWithAttention:
         model.set_model_unet_function_wrapper(UnetFunctionWrapper())
         model.set_model_sampler_cfg_function(SamplerCfgFunctionWrapper())
         model.set_model_attn1_patch(InputPatch())
+        model.set_model_attn2_patch(InputPatch())
         for block_name in attn_stored_data.keys():
             for block_number  in attn_stored_data[block_name].keys():
                 for attention_index in attn_stored_data[block_name][block_number].keys():
                     model.set_model_attn1_replace(ReplacePatch(),block_name,block_number,attention_index)
+                    model.set_model_attn2_replace(ReplacePatch(),block_name,block_number,attention_index)
         self.inject_comfyui(attn_stored)
         model.model_options["transformer_options"]["attn_stored"] = attn_stored
         return (model,)
