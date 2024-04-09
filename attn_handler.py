@@ -241,7 +241,7 @@ class InputPatch:
             has_feature_guidance = 2 in cond_or_uncond_replenishment
             for i in range(len(cond_or_uncond_replenishment)):
                 cond_flag = cond_or_uncond_replenishment[i]
-                if cond_flag == 0 or (cond_flag == 1 and has_feature_guidance):
+                if cond_flag == 0 or cond_flag == 2:
                     combo_feature_hidden_states.append(feature_hidden_states)
                 else :
                     empty_feature = torch.zeros_like(feature_hidden_states)
