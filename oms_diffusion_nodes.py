@@ -25,6 +25,15 @@ if hasattr(F, "scaled_dot_product_attention"):
 else:
     from .attn_handler import REFAttnProcessor as REFAttnProcessor
 
+#x
+from diffusers import UniPCMultistepScheduler, AutoencoderKL
+from diffusers.pipelines import StableDiffusionPipeline
+import argparse
+
+from .oms.garment_diffusion import ClothAdapter
+from .oms.OmsDiffusionPipeline import OmsDiffusionPipeline
+#x
+
 class AdditionalFeaturesWithAttention:
     @classmethod
     def INPUT_TYPES(s):
@@ -184,11 +193,44 @@ class AdditionalFeaturesWithAttention:
         latent_image = feature_image["samples"].to(offload_device)
         return attn_stored["data"]
 
+class RunOmsNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { "cloth_image": ("IMAGE", ),}}
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "run_oms"
+
+    CATEGORY = "loaders"
+    
+    def run_oms(self, cloth_image):
+        unet_path = folder_paths.get_full_path("unet", "oms_diffusion_100000.safetensors")
+        pipe_path = folder_paths.get_folder_paths("checkpoints")[0]+"/SG161222/Realistic_Vision_V4.0_noVAE"
+        seg_path = folder_paths.get_full_path("checkpoints", "cloth_segm.pth")
+        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(dtype=torch.float16)
+        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path, vae=vae, torch_dtype=torch.float16)
+        pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+        full_net = ClothAdapter(pipe, unet_path, "cuda",True,seg_path)
+        cloth_mask_image = None
+        prompt = "a photography of a model"
+        a_prompt = "best quality, high quality"
+        num_samples = 1
+        n_prompt = "bare, monochrome, lowres, bad anatomy, worst quality, low quality"
+        seed = 1234
+        scale = 5.0
+        cloth_guidance_scale = 2.5
+        sample_steps = 1
+        height = 512
+        width = 512
+        images, cloth_mask_image =full_net(cloth_image, cloth_mask_image, prompt, a_prompt, num_samples, n_prompt, seed, scale, cloth_guidance_scale, sample_steps, height, width)
+        return ("你好呀",)
 
 NODE_CLASS_MAPPINGS = {
     "Additional Features With Attention": AdditionalFeaturesWithAttention,
+    "RUN OMS": RunOmsNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Additional Features With Attention": "Additional Features With Attention",
+    "RUN OMS": "RUN OMS",
 }
