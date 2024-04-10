@@ -216,6 +216,25 @@ class UnetFunctionWrapper:
             del pred_result
         return output
 
+
+class SaveAttnInputPatch:
+ 
+    def __call__(self, q, k, v, extra_options):
+        if "attn_stored" in extra_options:
+            attn_stored = extra_options["attn_stored"]
+        if attn_stored is None:
+            return (q,k,v)
+        attn_stored_data = attn_stored["data"]
+        block_name = extra_options["block"][0]
+        block_id = extra_options["block"][1]
+        block_index = extra_options["block_index"]
+        if block_name not in attn_stored_data:
+            attn_stored_data[block_name] = {}
+        if block_id not in attn_stored_data[block_name]:
+            attn_stored_data[block_name][block_id] = {}
+        attn_stored_data[block_name][block_id][block_index] = q
+        return (q,k,v)
+
 class InputPatch:
  
     def __call__(self, q, k, v, extra_options):
@@ -238,7 +257,6 @@ class InputPatch:
                 raise ValueError("Your featured image must be the same width and height as the image you want to generate!")
             feature_hidden_states = feature_hidden_states.to(q.dtype)
             combo_feature_hidden_states = []
-            has_feature_guidance = 2 in cond_or_uncond_replenishment
             for i in range(len(cond_or_uncond_replenishment)):
                 cond_flag = cond_or_uncond_replenishment[i]
                 if cond_flag == 0 or cond_flag == 2:
