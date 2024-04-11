@@ -76,23 +76,6 @@ class REFAttnProcessor2_0(AttnProcessor2_0):
 
 class SamplerCfgFunctionWrapper:
 
-    def _rescale_noise_cfg_(self, noise_cfg, noise_pred_text, guidance_rescale=0.0):
-        """
-        *** copy from diffusers pipeline_stable_diffusion.py -> rescale_noise_cfg ***
-        Rescale `noise_cfg` according to `guidance_rescale`. Based on findings of [Common Diffusion Noise Schedules and
-        Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf). See Section 3.4
-        """
-        std_text = noise_pred_text.std(
-            dim=list(range(1, noise_pred_text.ndim)), keepdim=True)
-        std_cfg = noise_cfg.std(
-            dim=list(range(1, noise_cfg.ndim)), keepdim=True)
-        # rescale the results from guidance (fixes overexposure)
-        noise_pred_rescaled = noise_cfg * (std_text / std_cfg)
-        # mix with the original results from guidance by factor guidance_rescale to avoid "plain looking" images
-        noise_cfg = guidance_rescale * noise_pred_rescaled + \
-            (1 - guidance_rescale) * noise_cfg
-        return noise_cfg
-
     def __call__(self, parameters) -> Any:
         cond = parameters["cond"]
         uncond = parameters["uncond"]
@@ -119,7 +102,7 @@ class SamplerCfgFunctionWrapper:
                     + feature_guidance_scale *
                     (cond_or_uncond_out_cond - uncond)
                 )
-                return input_x - self._rescale_noise_cfg_(noise_pred, cond, cond_scale)
+                return input_x - noise_pred
         else:
             return uncond + (cond - uncond) * cond_scale
 
@@ -245,7 +228,7 @@ class UnetFunctionWrapper:
 
                     attn_stored["cond_or_uncond_out_cond"][:, :, area[2]:area[0] +
                                                            area[2], area[3]:area[1] + area[3]] += pred_result[i] * mult
-                    attn_stored["cond_or_uncond_out_count"][:, :, area[2]                                                            :area[0] + area[2], area[3]:area[1] + area[3]] += mult
+                    attn_stored["cond_or_uncond_out_count"][:, :, area[2]:area[0] + area[2], area[3]:area[1] + area[3]] += mult
                 else:
                     new_output.append(pred_result[i])
             output = torch.cat(new_output)

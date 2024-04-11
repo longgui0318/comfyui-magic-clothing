@@ -2,6 +2,10 @@ import os
 import torch
 import torch.nn.functional as F
 import folder_paths
+import numpy as np
+from PIL import Image
+
+from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
 
 import comfy.ops
 import comfy.model_patcher
@@ -57,8 +61,8 @@ class AdditionalFeaturesWithAttention:
     CATEGORY = "loaders"
 
     def add_features(self, model, clip, seed, sampler_name, scheduler, feature_image, feature_unet_name, enable_feature_guidance=True, feature_guidance_scale=2.5):
-        attn_stored_data = self.calculate_features_ldm(
-            clip, seed, sampler_name, scheduler, feature_unet_name, feature_image)
+        attn_stored_data = self.calculate_features_ldm(clip, seed, sampler_name, scheduler, feature_unet_name, feature_image)
+        # attn_stored_data = self.calculate_features(model,clip,feature_unet_name, feature_image)
         attn_stored = {}
         attn_stored["enable_feature_guidance"] = enable_feature_guidance
         attn_stored["feature_guidance_scale"] = feature_guidance_scale
@@ -67,14 +71,14 @@ class AdditionalFeaturesWithAttention:
         model.set_model_unet_function_wrapper(UnetFunctionWrapper())
         model.set_model_sampler_cfg_function(SamplerCfgFunctionWrapper())
         model.set_model_attn1_patch(InputPatch())
-        model.set_model_attn2_patch(InputPatch())
+        # model.set_model_attn2_patch(InputPatch())
         for block_name in attn_stored_data.keys():
             for block_number in attn_stored_data[block_name].keys():
                 for attention_index in attn_stored_data[block_name][block_number].keys():
                     model.set_model_attn1_replace(
                         ReplacePatch(), block_name, block_number, attention_index)
-                    model.set_model_attn2_replace(
-                        ReplacePatch(), block_name, block_number, attention_index)
+                    # model.set_model_attn2_replace(
+                    #     ReplacePatch(), block_name, block_number, attention_index)
         self.inject_comfyui(attn_stored)
         model.model_options["transformer_options"]["attn_stored"] = attn_stored
         return (model, seed, sampler_name, scheduler,)
@@ -154,14 +158,14 @@ class AdditionalFeaturesWithAttention:
         return attn_store
 
     def calculate_features_ldm(self, source_clip, seed, sampler_name, scheduler, feature_unet_name, feature_image):
-
+        
         offload_device = model_management.unet_offload_device()
         load_device = model_management.get_torch_device()
 
         unet_path = folder_paths.get_full_path("unet", feature_unet_name)
         model_patcher = comfy.sd.load_unet(unet_path)
         model_patcher.set_model_attn1_patch(SaveAttnInputPatch())
-        model_patcher.set_model_attn2_patch(SaveAttnInputPatch())
+        # model_patcher.set_model_attn2_patch(SaveAttnInputPatch())
         attn_stored = {}
         attn_stored["data"] = {}
         model_patcher.model_options["transformer_options"]["attn_stored"] = attn_stored
@@ -169,7 +173,6 @@ class AdditionalFeaturesWithAttention:
         latent_image = feature_image["samples"]
         if latent_image.shape[0] > 1:
             latent_image = torch.chunk(latent_image, latent_image.shape[0])[0]
-
         noise = comfy.sample.prepare_noise(latent_image, seed, None)
 
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
@@ -196,21 +199,16 @@ class AdditionalFeaturesWithAttention:
 class RunOmsNode:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "cloth_image": ("IMAGE", ),}}
+        return {"required": {"image": ("IMAGE",),"model": ("MODEL",), "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),}}
 
-    RETURN_TYPES = ("STRING",)
+    RETURN_TYPES = ("IMAGE",)
     FUNCTION = "run_oms"
 
     CATEGORY = "loaders"
     
-    def run_oms(self, cloth_image):
-        unet_path = folder_paths.get_full_path("unet", "oms_diffusion_100000.safetensors")
-        pipe_path = folder_paths.get_folder_paths("checkpoints")[0]+"/SG161222/Realistic_Vision_V4.0_noVAE"
-        seg_path = folder_paths.get_full_path("checkpoints", "cloth_segm.pth")
-        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(dtype=torch.float16)
-        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path, vae=vae, torch_dtype=torch.float16)
-        pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-        full_net = ClothAdapter(pipe, unet_path, "cuda",True,seg_path)
+    def run_oms(self,image, model,seed):
+        image = image.cpu().squeeze(0).numpy()
+        image = Image.fromarray(image.astype(np.uint8))
         cloth_mask_image = None
         prompt = "a photography of a model"
         a_prompt = "best quality, high quality"
@@ -222,15 +220,40 @@ class RunOmsNode:
         sample_steps = 1
         height = 512
         width = 512
-        images, cloth_mask_image =full_net(cloth_image, cloth_mask_image, prompt, a_prompt, num_samples, n_prompt, seed, scale, cloth_guidance_scale, sample_steps, height, width)
-        return ("你好呀",)
+        images, cloth_mask_image =model.generate(image, cloth_mask_image, prompt, a_prompt, num_samples, n_prompt, seed, scale, cloth_guidance_scale, sample_steps, height, width)
+        image = np.array(images).astype(np.float32) / 255.0
+        image = torch.from_numpy(image)
+        return (image.unsqueeze(0),)
+
+class LoadOmsNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),}}
+
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("MODEL",)
+    FUNCTION = "run_oms"
+
+    CATEGORY = "loaders"
+    
+    def run_oms(self, seed):
+        unet_path = folder_paths.get_full_path("unet", "oms_diffusion_100000.safetensors")
+        pipe_path = folder_paths.get_folder_paths("checkpoints")[0]+"/SG161222/Realistic_Vision_V4.0_noVAE"
+        seg_path = folder_paths.get_full_path("checkpoints", "cloth_segm.pth")
+        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(dtype=torch.float16)
+        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path, vae=vae, torch_dtype=torch.float16)
+        pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+        full_net = ClothAdapter(pipe, unet_path, "cpu",True,seg_path)
+        return (full_net,)
 
 NODE_CLASS_MAPPINGS = {
     "Additional Features With Attention": AdditionalFeaturesWithAttention,
     "RUN OMS": RunOmsNode,
+    "LOAD OMS": LoadOmsNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Additional Features With Attention": "Additional Features With Attention",
     "RUN OMS": "RUN OMS",
+    "LOAD OMS": "LOAD OMS",
 }
