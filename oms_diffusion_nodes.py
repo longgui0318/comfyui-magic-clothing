@@ -37,6 +37,18 @@ import argparse
 from .oms.garment_diffusion import ClothAdapter
 from .oms.OmsDiffusionPipeline import OmsDiffusionPipeline
 #x
+class AttnStoredExtra:
+    def __init__(self,pt) -> None:
+        self.pt = pt.unsqueeze(0)
+    
+    def can_concat(self,other):
+        return True
+    
+    def concat(self, pts):
+        out = [self.pt]
+        for x in pts:
+            out.append(x.pt)
+        return torch.cat(out)
 
 class AdditionalFeaturesWithAttention:
     @classmethod
@@ -79,34 +91,19 @@ class AdditionalFeaturesWithAttention:
                         ReplacePatch(), block_name, block_number, attention_index)
                     # model.set_model_attn2_replace(
                     #     ReplacePatch(), block_name, block_number, attention_index)
-        self.inject_comfyui(attn_stored)
+        self.inject_comfyui()
         model.model_options["transformer_options"]["attn_stored"] = attn_stored
         return (model, seed, sampler_name, scheduler,)
 
-    def inject_comfyui(self, attn_stored_ref):
+    def inject_comfyui(self):
         old_get_area_and_mult = comfy.samplers.get_area_and_mult
-
         def get_area_and_mult(self, *args, **kwargs):
-            result = old_get_area_and_mult(self, *args, **kwargs)
+            result = old_get_area_and_mult(self, *args, **kwargs)           
             mult = result[1]
+            conditioning = result[2]
             area = result[3]
-            input_x = result[0]
-            if attn_stored_ref is not None:
-                check_key = ["cond_or_uncond_out_cond", "cond_or_uncond_out_uncond", "out_cond_init",
-                             "out_count_init", "cond_or_uncond_extra_options", "cond_or_uncond_replenishment"]
-                need_clean_memory = False
-                for key in check_key:
-                    if key in attn_stored_ref:
-                        need_clean_memory = True
-                if need_clean_memory:
-                    clean_attn_stored_memory(attn_stored_ref)
-                if "input_x_extra_options" not in attn_stored_ref:
-                    attn_stored_ref["input_x_extra_options"] = []
-                attn_stored_ref["input_x_extra_options"].append({
-                    "input_x": input_x,
-                    "mult": mult,
-                    "area": area
-                })
+            conditioning["c_attn_stored_mult"] = AttnStoredExtra(mult)
+            conditioning["c_attn_stored_area"] = AttnStoredExtra(torch.tensor([area[0],area[1],area[2],area[3]]))
             return result
         comfy.samplers.get_area_and_mult = get_area_and_mult
 
@@ -165,7 +162,6 @@ class AdditionalFeaturesWithAttention:
         unet_path = folder_paths.get_full_path("unet", feature_unet_name)
         model_patcher = comfy.sd.load_unet(unet_path)
         model_patcher.set_model_attn1_patch(SaveAttnInputPatch())
-        # model_patcher.set_model_attn2_patch(SaveAttnInputPatch())
         attn_stored = {}
         attn_stored["data"] = {}
         model_patcher.model_options["transformer_options"]["attn_stored"] = attn_stored
@@ -199,31 +195,34 @@ class AdditionalFeaturesWithAttention:
 class RunOmsNode:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"image": ("IMAGE",),"model": ("MODEL",), "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),}}
+        return {"required": {"cloth_latent": ("LATENT",),
+                             "gen_latent": ("LATENT",),
+                             "model": ("MODEL",),
+                             "clip": ("CLIP", ),
+                             "positive": ("CONDITIONING", ),
+                             "negative": ("CONDITIONING", ),
+                             "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                             "scale": ("FLOAT", {"default": 5, "min": 0.0, "max": 10.0,"step": 0.01}),
+                             "cloth_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 10.0,"step": 0.01}),
+                             "steps": ("INT", {"default": 25, "min": 0, "max": 100}),
+                             "height": ("INT", {"default": 768, "min": 0, "max": 2048}),
+                             "width": ("INT", {"default": 512, "min": 0, "max": 2048}),
+                             }
+                }
 
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("LATENT",)
     FUNCTION = "run_oms"
 
     CATEGORY = "loaders"
     
-    def run_oms(self,image, model,seed):
-        image = image.cpu().squeeze(0).numpy()
-        image = Image.fromarray(image.astype(np.uint8))
-        cloth_mask_image = None
-        prompt = "a photography of a model"
-        a_prompt = "best quality, high quality"
+    def run_oms(self,cloth_latent,gen_latent, model,clip,positive,negative,seed,scale,cloth_guidance_scale,steps,height,width):
+        tokens = clip.tokenize("")
+        cond, _ = clip.encode_from_tokens(tokens, return_pooled=True)
+        
         num_samples = 1
-        n_prompt = "bare, monochrome, lowres, bad anatomy, worst quality, low quality"
-        seed = 1234
-        scale = 5.0
-        cloth_guidance_scale = 2.5
-        sample_steps = 1
-        height = 512
-        width = 512
-        images, cloth_mask_image =model.generate(image, cloth_mask_image, prompt, a_prompt, num_samples, n_prompt, seed, scale, cloth_guidance_scale, sample_steps, height, width)
-        image = np.array(images).astype(np.float32) / 255.0
-        image = torch.from_numpy(image)
-        return (image.unsqueeze(0),)
+        prompt_embeds_null = cond
+        gen_latent["samples"] = model.generate(cloth_latent["samples"],gen_latent["samples"], prompt_embeds_null, positive[0][0], negative[0][0], num_samples, seed, scale, cloth_guidance_scale, steps, height, width)
+        return (gen_latent,)
 
 class LoadOmsNode:
     @classmethod
@@ -237,13 +236,13 @@ class LoadOmsNode:
     CATEGORY = "loaders"
     
     def run_oms(self, seed):
-        unet_path = folder_paths.get_full_path("unet", "oms_diffusion_100000.safetensors")
-        pipe_path = folder_paths.get_folder_paths("checkpoints")[0]+"/SG161222/Realistic_Vision_V4.0_noVAE"
-        seg_path = folder_paths.get_full_path("checkpoints", "cloth_segm.pth")
-        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(dtype=torch.float16)
-        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path, vae=vae, torch_dtype=torch.float16)
+        unet_path = folder_paths.get_full_path("unet", "oms_diffusion_768_200000.safetensors")
+        pipe_path = "SG161222/Realistic_Vision_V4.0_noVAE"
+        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,torch_dtype=torch.float16)
         pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-        full_net = ClothAdapter(pipe, unet_path, "cpu",True,seg_path)
+        del pipe.vae
+        del pipe.text_encoder
+        full_net = ClothAdapter(pipe, unet_path, "cuda",True)
         return (full_net,)
 
 NODE_CLASS_MAPPINGS = {

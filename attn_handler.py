@@ -114,6 +114,16 @@ class UnetFunctionWrapper:
         input_shape = [input[0] + inject_batch_count] + list(input)[1:]
         return model.memory_required(input_shape) < free_memory
 
+    def _reorganization_c_data_(self,c,key):
+        if key in c:
+            return self._chunk_data_(c[key]) 
+        return None,None
+    
+    def _chunk_data_(self,data):
+        if data is None:
+            return None,None
+        return torch.chunk(data,data.shape[0]),[]
+
     def __call__(self, apply_model, parameters):
         input = parameters["input"]
         timestep = parameters["timestep"]
@@ -122,8 +132,6 @@ class UnetFunctionWrapper:
         if "attn_stored" in transformer_options:
             attn_stored = transformer_options["attn_stored"]
             enable_feature_guidance = attn_stored["enable_feature_guidance"]
-            input_x_extra_options = attn_stored["input_x_extra_options"]
-            fined_nput_x_extra_option_indexs = []
             cond_or_uncond = parameters["cond_or_uncond"]
             cond_or_uncond_replenishment = []
             # 对传入参数进行调整，调整方式如下
@@ -133,57 +141,50 @@ class UnetFunctionWrapper:
             timestep_array = torch.chunk(timestep, timestep.shape[0])
             new_input_array = []
             new_timestep = []
-            new_c_concat = None
-            new_c_crossattn = None
-            c_concat_array = None
-            c_crossattn_array = None
+            
+            c_concat_data,c_concat_data_new = self._reorganization_c_data_(c,"c_concat")
+            c_crossattn_data,c_crossattn_data_new = self._reorganization_c_data_(c,"c_crossattn")
+            c_attn_stored_mult_data,_ = self._reorganization_c_data_(c,"c_attn_stored_mult")
+            c_attn_stored_area_data,_ = self._reorganization_c_data_(c,"c_attn_stored_area")
+            #移除因为注入增加的内容，后续已不再需要
+            c["c_attn_stored_mult"] = None
+            c["c_attn_stored_area"] = None
+  
             cond_or_uncond_extra_options = {}
-            if "c_concat" in c:
-                c_concat = c["c_concat"]
-                c_concat_array = torch.chunk(c_concat, c_concat.shape[0])
-                new_c_concat = []
-            if "c_crossattn" in c:
-                c_crossattn = c["c_crossattn"]
-                c_crossattn_array = torch.chunk(
-                    c_crossattn, c_crossattn.shape[0])
-                new_c_crossattn = []
             for i in range(len(input_array)):
                 # 需注意，3月底comfyui更新，为了支持多conds实现，移除了cond本身的判定，这个值存的是index
                 cond_flag = cond_or_uncond[i]
-                fined_nput_x_extra_option = None
-                for input_x_extra_i in range(len(input_x_extra_options)):
-                    if input_x_extra_i in fined_nput_x_extra_option_indexs:
-                        continue
-                    fined_nput_x_extra_option_indexs.append(input_x_extra_i)
-                    if torch.eq(input_array[i], input_x_extra_options[input_x_extra_i]["input_x"]).all():
-                        fined_nput_x_extra_option = input_x_extra_options[input_x_extra_i]
-                        break
                 new_input_array.append(input_array[i])
                 new_timestep.append(timestep_array[i])
-                if c_concat_array is not None:
-                    new_c_concat.append(c_concat_array[i])
-                if c_crossattn_array is not None:
-                    new_c_crossattn.append(c_crossattn_array[i])
+                if c_concat_data is not None:
+                    c_concat_data_new.append(c_concat_data[i])
+                if c_crossattn_data is not None:
+                    c_crossattn_data_new.append(c_crossattn_data[i])
+                
                 cond_or_uncond_replenishment.append(1 if cond_flag == 1 else 0)
                 if enable_feature_guidance and cond_flag == 1:
-                    cond_or_uncond_extra_options[i+1] = {
-                        "mult": fined_nput_x_extra_option["mult"] if fined_nput_x_extra_option is not None else None,
-                        "area": fined_nput_x_extra_option["area"] if fined_nput_x_extra_option is not None else None
-                    }
+                    
+                    if c_attn_stored_mult_data is not None and  c_attn_stored_area_data is not None:
+                        mult = c_attn_stored_mult_data[i]
+                        area = c_attn_stored_area_data[i]
+                        cond_or_uncond_extra_options[i+1] = {
+                            "mult": mult.squeeze(0),
+                            "area": (area[0][0],area[0][1],area[0][2],area[0][3])
+                        }
                     # 注意，在启用特征引导的时候，需要增加一个负向空特征来处理，这个复制的负向特征是给后面计算空特征用的
                     cond_or_uncond_replenishment.append(2)
                     new_input_array.append(input_array[i])
                     new_timestep.append(timestep_array[i])
-                    if c_concat_array is not None:
-                        new_c_concat.append(c_concat_array[i])
-                    if c_crossattn_array is not None:
-                        new_c_crossattn.append(c_crossattn_array[i])
+                    if c_concat_data is not None:
+                        c_concat_data_new.append(c_concat_data[i])
+                    if c_crossattn_data is not None:
+                        c_crossattn_data_new.append(c_crossattn_data[i])
             input = torch.cat(new_input_array,)
             timestep = torch.cat(new_timestep,)
-            if new_c_concat is not None:
-                c["c_concat"] = torch.cat(new_c_concat,)
-            if new_c_crossattn is not None:
-                c["c_crossattn"] = torch.cat(new_c_crossattn,)
+            if c_concat_data_new is not None:
+                c["c_concat"] = torch.cat(c_concat_data_new,)
+            if c_crossattn_data_new is not None:
+                c["c_crossattn"] = torch.cat(c_crossattn_data_new,)
             if "out_cond_init" not in attn_stored:
                 attn_stored["out_cond_init"] = torch.zeros_like(input_array[0])
             if "out_count_init" not in attn_stored:
@@ -197,13 +198,13 @@ class UnetFunctionWrapper:
             del timestep_array
             del new_input_array
             del new_timestep
-            del new_c_concat
-            del new_c_crossattn
-            del c_concat_array
-            del c_crossattn_array
+            del c_concat_data
+            del c_concat_data_new
+            del c_crossattn_data
+            del c_crossattn_data_new
+            del c_attn_stored_mult_data
+            del c_attn_stored_area_data
             del cond_or_uncond_extra_options
-            for i in range(len(fined_nput_x_extra_option_indexs) - 1, -1, -1):
-                del input_x_extra_options[fined_nput_x_extra_option_indexs[i]]
 
         output = apply_model(input, timestep, **c)
         if "attn_stored" in transformer_options:
