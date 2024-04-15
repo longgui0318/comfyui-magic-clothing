@@ -1,78 +1,8 @@
 import torch
-import math
-from typing import Any, Optional
-import torch.nn.functional as F
+from typing import Any
 from comfy import model_management
-from diffusers.models.attention_processor import Attention, AttnProcessor, AttnProcessor2_0
 from comfy.ldm.modules.attention import optimized_attention
-from .utils import save_attn, clean_attn_stored_memory
-
-
-class REFAttnProcessor(AttnProcessor):
-    def __init__(self, need_save=True, block_name=None, block_number=None, attention_index=None):
-        super().__init__()
-        self.block_name = block_name
-        self.block_number = block_number
-        self.attention_index = attention_index
-        self.need_save = need_save
-
-    def __call__(
-        self,
-        attn: Attention,
-        hidden_states: torch.FloatTensor,
-        encoder_hidden_states: Optional[torch.FloatTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        temb: Optional[torch.FloatTensor] = None,
-        attn_store=None,
-        *args,
-        **kwargs,
-    ) -> torch.Tensor:
-        if self.need_save:
-            save_attn(hidden_states, attn_store, self.block_name,
-                      self.block_number, self.attention_index)
-        return super().__call__(
-            attn,
-            hidden_states,
-            encoder_hidden_states,
-            attention_mask,
-            temb,
-            *args,
-            **kwargs,
-        )
-
-
-class REFAttnProcessor2_0(AttnProcessor2_0):
-    def __init__(self, need_save=True, block_name=None, block_number=None, attention_index=None):
-        super().__init__()
-        self.block_name = block_name
-        self.block_number = block_number
-        self.attention_index = attention_index
-        self.need_save = need_save
-
-    def __call__(
-        self,
-        attn: Attention,
-        hidden_states: torch.FloatTensor,
-        encoder_hidden_states: Optional[torch.FloatTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        temb: Optional[torch.FloatTensor] = None,
-        attn_store=None,
-        *args,
-        **kwargs,
-    ) -> torch.FloatTensor:
-        if self.need_save:
-            save_attn(hidden_states, attn_store, self.block_name,
-                      self.block_number, self.attention_index)
-        return super().__call__(
-            attn,
-            hidden_states,
-            encoder_hidden_states,
-            attention_mask,
-            temb,
-            *args,
-            **kwargs,
-        )
-
+from .utils import clean_attn_stored_memory
 
 class SamplerCfgFunctionWrapper:
 
@@ -146,9 +76,11 @@ class UnetFunctionWrapper:
             c_crossattn_data,c_crossattn_data_new = self._reorganization_c_data_(c,"c_crossattn")
             c_attn_stored_mult_data,_ = self._reorganization_c_data_(c,"c_attn_stored_mult")
             c_attn_stored_area_data,_ = self._reorganization_c_data_(c,"c_attn_stored_area")
+            c_attn_stored_control_data = c["c_attn_stored_control"] if "c_attn_stored_control" in c else None
             #移除因为注入增加的内容，后续已不再需要
             c["c_attn_stored_mult"] = None
             c["c_attn_stored_area"] = None
+            c["c_attn_stored_control"] = None
   
             cond_or_uncond_extra_options = {}
             for i in range(len(input_array)):
@@ -188,8 +120,9 @@ class UnetFunctionWrapper:
             if "out_cond_init" not in attn_stored:
                 attn_stored["out_cond_init"] = torch.zeros_like(input_array[0])
             if "out_count_init" not in attn_stored:
-                attn_stored["out_count_init"] = torch.zeros_like(
-                    input_array[0] * 1e-37)
+                attn_stored["out_count_init"] = torch.zeros_like(input_array[0] * 1e-37)
+            if c_attn_stored_control_data is not None:
+                c['control'] = c_attn_stored_control_data.get_control(input, timestep, c, len(cond_or_uncond_replenishment))
             attn_stored["cond_or_uncond_replenishment"] = cond_or_uncond_replenishment
             attn_stored["cond_or_uncond_extra_options"] = cond_or_uncond_extra_options
 

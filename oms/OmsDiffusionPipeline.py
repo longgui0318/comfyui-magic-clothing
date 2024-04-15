@@ -148,9 +148,7 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
         # Here we concatenate the unconditional and text embeddings into a single batch
         # to avoid doing two forward passes
         if self.do_classifier_free_guidance:
-            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
-            # 测试移除变更代码
-            #prompt_embeds = torch.cat([negative_prompt_embeds, negative_prompt_embeds, prompt_embeds])
+            prompt_embeds = torch.cat([negative_prompt_embeds, negative_prompt_embeds, prompt_embeds])
 
 
         # 4. Prepare timesteps
@@ -183,9 +181,7 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
                     continue
 
                 # expand the latents if we are doing classifier free guidance
-                latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
-                # 测试移除变更代码
-                # latent_model_input = torch.cat([latents] * 3) if self.do_classifier_free_guidance else latents
+                latent_model_input = torch.cat([latents] * 3) if self.do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                 # predict the noise residual
@@ -194,24 +190,18 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
                     t,
                     encoder_hidden_states=prompt_embeds,
                     timestep_cond=timestep_cond,
-                    # cross_attention_kwargs=self.cross_attention_kwargs,
+                    cross_attention_kwargs=self.cross_attention_kwargs,
                     return_dict=False,
                 )[0]
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
-                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred_uncond, noise_pred_cloth, noise_pred_text = noise_pred.chunk(3)
                     noise_pred = (
                         noise_pred_uncond
-                        + guidance_scale * (noise_pred_text - noise_pred_uncond)
+                        + guidance_scale * (noise_pred_text - noise_pred_cloth)
+                        + cloth_guidance_scale * (noise_pred_cloth - noise_pred_uncond)
                     )
-                    # 测试移除变更代码
-                    #noise_pred_uncond, noise_pred_cloth, noise_pred_text = noise_pred.chunk(3)
-                    # noise_pred = (
-                    #     noise_pred_uncond
-                    #     + guidance_scale * (noise_pred_text - noise_pred_cloth)
-                    #     + cloth_guidance_scale * (noise_pred_cloth - noise_pred_uncond)
-                    # )
 
                 if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
                     # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
