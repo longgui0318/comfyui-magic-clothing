@@ -233,7 +233,7 @@ class LoadOmsNode:
         pipe_path = "SG161222/Realistic_Vision_V4.0_noVAE"
         pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,torch_dtype=torch.float16)
         pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-        full_net = ClothAdapter(pipe, unet_path, "cpu",True)
+        full_net = ClothAdapter(pipe, unet_path, "cuda",True)
         return (full_net,)
 
 NODE_CLASS_MAPPINGS = {
