@@ -1,3 +1,4 @@
+import copy
 import torch
 import folder_paths
 
@@ -6,6 +7,7 @@ import comfy.model_patcher
 import comfy.lora
 import comfy.t2i_adapter.adapter
 import comfy.model_base
+import comfy.model_detection
 import comfy.supported_models_base
 import comfy.taesd.taesd
 import comfy.ldm.modules.diffusionmodules.openaimodel
@@ -47,17 +49,68 @@ class AttnStoredExtra:
                         return x.extra
                 return None
 
-class AdditionalFeaturesWithAttention:
+class LoadMagicClothingModel:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                {"model": ("MODEL",),
+                {"sourceModel": ("MODEL",),
+                 "magicClothingUnet": (folder_paths.get_filename_list("unet"), ),
+                 }
+                }
+    RETURN_TYPES = ("MODEL", "MODEL")
+    RETURN_NAMES = ("sourceModel", "magicClothingModel")
+    FUNCTION = "load_unet"
+
+    CATEGORY = "model_patches"
+
+    def load_unet(self, sourceModel, magicClothingUnet):
+        unet_path = folder_paths.get_full_path("unet", magicClothingUnet)
+        unet_state_dict = comfy.utils.load_torch_file(unet_path)
+        model_config = copy.deepcopy(sourceModel.model.model_config)
+        if model_config.unet_config["in_channels"] == 9:
+            model_config.unet_config["in_channels"] = 4
+            model_config.unet_config["model_channels"] = 320
+        
+        source_state_dict = sourceModel.model.diffusion_model.state_dict()
+        
+        diffusers_keys = comfy.utils.unet_to_diffusers(model_config.unet_config)
+
+        new_sd = {}
+        for k in diffusers_keys:
+            ldm_k = diffusers_keys[k]
+            if k in unet_state_dict:
+                new_sd[diffusers_keys[k]] = unet_state_dict.pop(k)
+            elif ldm_k in source_state_dict:
+                new_sd[ldm_k] = source_state_dict[ldm_k]
+        
+        parameters = comfy.utils.calculate_parameters(new_sd)
+        
+        load_device = model_management.get_torch_device()
+        offload_device = model_management.unet_offload_device()
+        unet_dtype = model_management.unet_dtype(model_params=parameters, supported_dtypes=model_config.supported_inference_dtypes)
+        manual_cast_dtype = model_management.unet_manual_cast(unet_dtype, load_device, model_config.supported_inference_dtypes)
+        model_config.set_inference_dtype(unet_dtype, manual_cast_dtype)
+        model = model_config.get_model(new_sd, "")
+        model = model.to(offload_device)
+        model.load_model_weights(new_sd, "")
+        left_over = unet_state_dict.keys()
+        if len(left_over) > 0:
+            print("left over keys in unet: {}".format(left_over))
+        model_patcher = comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=offload_device)
+        return (sourceModel,model_patcher)
+
+
+class AddMagicClothingAttention:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                {"sourceModel": ("MODEL",),
+                 "magicClothingModel": ("MODEL",),
                  "clip": ("CLIP", ),
                  "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                  "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
                  "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
                  "feature_image": ("LATENT", ),
-                 "feature_unet_name": (folder_paths.get_filename_list("unet"), ),
                  "enable_feature_guidance": ("BOOLEAN", {"default": True}),
                  "feature_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
                  }
@@ -69,24 +122,23 @@ class AdditionalFeaturesWithAttention:
 
     CATEGORY = "model_patches"
 
-    def add_features(self, model, clip, seed, sampler_name, scheduler, feature_image, feature_unet_name, enable_feature_guidance=True, feature_guidance_scale=2.5):
-        attn_stored_data = self.calculate_features_ldm(clip, seed, sampler_name, scheduler, feature_unet_name, feature_image)
+    def add_features(self, sourceModel,magicClothingModel, clip, seed, sampler_name, scheduler, feature_image, enable_feature_guidance=True, feature_guidance_scale=2.5):
+        attn_stored_data = self.calculate_features(magicClothingModel,clip,seed, sampler_name, scheduler, feature_image)
         attn_stored = {}
         attn_stored["enable_feature_guidance"] = enable_feature_guidance
         attn_stored["feature_guidance_scale"] = feature_guidance_scale
         attn_stored["data"] = attn_stored_data
-        model = model.clone()
-        model.set_model_unet_function_wrapper(UnetFunctionWrapper())
-        model.set_model_sampler_cfg_function(SamplerCfgFunctionWrapper())
-        model.set_model_attn1_patch(InputPatch())
+        sourceModel = sourceModel.clone()
+        sourceModel.set_model_unet_function_wrapper(UnetFunctionWrapper())
+        sourceModel.set_model_sampler_cfg_function(SamplerCfgFunctionWrapper())
+        sourceModel.set_model_attn1_patch(InputPatch())
         for block_name in attn_stored_data.keys():
             for block_number in attn_stored_data[block_name].keys():
                 for attention_index in attn_stored_data[block_name][block_number].keys():
-                    model.set_model_attn1_replace(
-                        ReplacePatch(), block_name, block_number, attention_index)
+                    sourceModel.set_model_attn1_replace(ReplacePatch(), block_name, block_number, attention_index)
         self.inject_comfyui()
-        model.model_options["transformer_options"]["attn_stored"] = attn_stored
-        return (model, seed, sampler_name, scheduler,)
+        sourceModel.model_options["transformer_options"]["attn_stored"] = attn_stored
+        return (sourceModel, seed, sampler_name, scheduler,)
 
     def inject_comfyui(self):
         old_get_area_and_mult = comfy.samplers.get_area_and_mult
@@ -102,15 +154,11 @@ class AdditionalFeaturesWithAttention:
             return result
         comfy.samplers.get_area_and_mult = get_area_and_mult
 
-    def calculate_features_ldm(self, source_clip, seed, sampler_name, scheduler, feature_unet_name, feature_image):
-        offload_device = model_management.unet_offload_device()
-
-        unet_path = folder_paths.get_full_path("unet", feature_unet_name)
-        model_patcher = comfy.sd.load_unet(unet_path)
-        model_patcher.set_model_attn1_patch(SaveAttnInputPatch())
+    def calculate_features(self,magicClothingModel, source_clip, seed, sampler_name, scheduler, feature_image):
+        magicClothingModel.set_model_attn1_patch(SaveAttnInputPatch())
         attn_stored = {}
         attn_stored["data"] = {}
-        model_patcher.model_options["transformer_options"]["attn_stored"] = attn_stored
+        magicClothingModel.model_options["transformer_options"]["attn_stored"] = attn_stored
 
         latent_image = feature_image["samples"]
         if latent_image.shape[0] > 1:
@@ -124,7 +172,7 @@ class AdditionalFeaturesWithAttention:
             positive_tokens, return_pooled=True)
         positive = [[positive_cond, {"pooled_output": positive_pooled}]]
         negative = []
-        samples = comfy.sample.sample(model_patcher, noise, 1, 1, sampler_name, scheduler,
+        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, sampler_name, scheduler,
                                       positive, negative, latent_image, denoise=1.0,
                                       disable_noise=False, start_step=None,
                                       last_step=None, force_full_denoise=False,
@@ -132,10 +180,8 @@ class AdditionalFeaturesWithAttention:
         del positive_cond
         del positive_pooled
         del positive_tokens
-        del model_patcher
         del samples
-
-        latent_image = feature_image["samples"].to(offload_device)
+        latent_image = feature_image["samples"].to(model_management.unet_offload_device())
         return attn_stored["data"]
 
 class RunOmsNode:
@@ -144,9 +190,9 @@ class RunOmsNode:
         return {"required": {"cloth_latent": ("LATENT",),
                              "gen_latent": ("LATENT",),
                              "model": ("MODEL",),
-                             "clip": ("CLIP", ),
-                             "positive": ("CONDITIONING", ),
-                             "negative": ("CONDITIONING", ),
+                            #  "clip": ("CLIP", ),
+                            #  "positive": ("CONDITIONING", ),
+                            #  "negative": ("CONDITIONING", ),
                              "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                              "scale": ("FLOAT", {"default": 5, "min": 0.0, "max": 10.0,"step": 0.01}),
                              "cloth_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 10.0,"step": 0.01}),
@@ -161,13 +207,13 @@ class RunOmsNode:
 
     CATEGORY = "loaders"
     
-    def run_oms(self,cloth_latent,gen_latent, model,clip,positive,negative,seed,scale,cloth_guidance_scale,steps,height,width):
-        tokens = clip.tokenize("")
-        cond, _ = clip.encode_from_tokens(tokens, return_pooled=True)
+    def run_oms(self,cloth_latent,gen_latent, model,seed,scale,cloth_guidance_scale,steps,height,width):
+        # tokens = clip.tokenize("")
+        # cond, _ = clip.encode_from_tokens(tokens, return_pooled=True)
         
         num_samples = 1
-        prompt_embeds_null = cond
-        gen_latent["samples"] = model.generate(cloth_latent["samples"],gen_latent["samples"], prompt_embeds_null, positive[0][0], negative[0][0], num_samples, seed, scale, cloth_guidance_scale, steps, height, width)
+        prompt_embeds_null = None
+        gen_latent["samples"] = model.generate(cloth_latent["samples"],gen_latent["samples"], prompt_embeds_null,None, None, num_samples, seed, scale, cloth_guidance_scale, steps, height, width)
         return (gen_latent,)
 
 class LoadOmsNode:
@@ -184,21 +230,22 @@ class LoadOmsNode:
     def run_oms(self, seed):
         unet_path = folder_paths.get_full_path("unet", "oms_diffusion_768_200000.safetensors")
         pipe_path = "SG161222/Realistic_Vision_V4.0_noVAE"
-        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,vae=None,text_encoder=None,torch_dtype=torch.float16)
+        # pipe_path = "/Users/apple/work/github/ComfyUI/models/checkpoints/SG161222/Realistic_Vision_V4.0_noVAE"
+        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,torch_dtype=torch.float16)
         pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-        del pipe.vae
-        del pipe.text_encoder
-        full_net = ClothAdapter(pipe, unet_path, "cuda",True)
+        full_net = ClothAdapter(pipe, unet_path, "cpu",True)
         return (full_net,)
 
 NODE_CLASS_MAPPINGS = {
-    "Additional Features With Attention": AdditionalFeaturesWithAttention,
+    "Load Magic Clothing Model": LoadMagicClothingModel,
+    "Add Magic Clothing Attention": AddMagicClothingAttention,
     "RUN OMS": RunOmsNode,
     "LOAD OMS": LoadOmsNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Additional Features With Attention": "Additional Features With Attention",
+    "Load Magic Clothing Model": "Load Magic Clothing Model",
+    "Add Magic Clothing Attention": "Add Magic Clothing Attention",
     "RUN OMS": "RUN OMS",
     "LOAD OMS": "LOAD OMS",
 }
