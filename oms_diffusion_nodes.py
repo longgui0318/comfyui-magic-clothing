@@ -163,7 +163,7 @@ class AddMagicClothingAttention:
         latent_image = feature_image["samples"]
         if latent_image.shape[0] > 1:
             latent_image = torch.chunk(latent_image, latent_image.shape[0])[0]
-        noise = comfy.sample.prepare_noise(latent_image, seed, None)
+        noise = torch.zeros_like(latent_image)
 
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
 
@@ -172,15 +172,24 @@ class AddMagicClothingAttention:
             positive_tokens, return_pooled=True)
         positive = [[positive_cond, {"pooled_output": positive_pooled}]]
         negative = []
-        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, sampler_name, scheduler,
-                                      positive, negative, latent_image, denoise=1.0,
-                                      disable_noise=False, start_step=None,
-                                      last_step=None, force_full_denoise=False,
-                                      noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=seed)
+        sigmas = comfy.samplers.calculate_sigmas(magicClothingModel.model.model_sampling,scheduler,1).to(magicClothingModel.load_device)
+        
+        dtype = magicClothingModel.model.get_dtype()
+        
+        timestep = sigmas[0].expand((latent_image.shape[0])).to(dtype)
+        latent_image = latent_image.to(magicClothingModel.load_device).to(dtype)
+        noise = noise.to(magicClothingModel.load_device).to(dtype)  
+        context = positive_cond.to(magicClothingModel.load_device).to(dtype)    
+        model_management.load_model_gpu(magicClothingModel)                      
+        magicClothingModel.model.diffusion_model(latent_image, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
+        # samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, sampler_name, scheduler,
+        #                               positive, negative, latent_image, denoise=1.0,
+        #                               disable_noise=False, start_step=None,
+        #                               last_step=None, force_full_denoise=False,
+        #                               noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=seed)
         del positive_cond
         del positive_pooled
         del positive_tokens
-        del samples
         latent_image = feature_image["samples"].to(model_management.unet_offload_device())
         return attn_stored["data"]
 
