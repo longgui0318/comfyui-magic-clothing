@@ -25,11 +25,11 @@ class ClothAdapter:
             ref_unet.conv_in = torch.nn.Conv2d(4, 320, ref_unet.conv_in.kernel_size, ref_unet.conv_in.stride, ref_unet.conv_in.padding)
             ref_unet.register_to_config(in_channels=4)
         state_dict = {}
+        hash_v1 = {}
         with safe_open(ref_path, framework="pt", device="cpu") as f:
             for key in f.keys():
                 state_dict[key] = f.get_tensor(key)
         ref_unet.load_state_dict(state_dict, strict=False)
-
         self.ref_unet = ref_unet.to(self.device, dtype=self.pipe.dtype)
         self.set_adapter(self.ref_unet, "read")
         self.attn_store = {}
@@ -59,9 +59,10 @@ class ClothAdapter:
             width=384,
             **kwargs,
     ):
-        gen_latents=gen_latents.to(self.device).to(dtype=self.pipe.dtype)
+        if gen_latents is not None:
+            gen_latents = 0.18215 * gen_latents
+            gen_latents=gen_latents.to(self.device).to(dtype=self.pipe.dtype)
         cloth_latent=cloth_latent.to(self.device).to(dtype=self.pipe.dtype)
-        gen_latents = 0.18215 * gen_latents
         cloth_latent = 0.18215 * cloth_latent
         prompt_embeds_null = prompt_embeds_null.to(self.device).to(dtype=self.pipe.dtype)
         positive = positive.to(self.device).to(dtype=self.pipe.dtype)

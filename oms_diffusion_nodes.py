@@ -188,11 +188,10 @@ class RunOmsNode:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {"cloth_latent": ("LATENT",),
-                             "gen_latent": ("LATENT",),
                              "model": ("MODEL",),
-                            #  "clip": ("CLIP", ),
-                            #  "positive": ("CONDITIONING", ),
-                            #  "negative": ("CONDITIONING", ),
+                             "clip": ("CLIP", ),
+                             "positive": ("CONDITIONING", ),
+                             "negative": ("CONDITIONING", ),
                              "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                              "scale": ("FLOAT", {"default": 5, "min": 0.0, "max": 10.0,"step": 0.01}),
                              "cloth_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 10.0,"step": 0.01}),
@@ -207,19 +206,21 @@ class RunOmsNode:
 
     CATEGORY = "loaders"
     
-    def run_oms(self,cloth_latent,gen_latent, model,seed,scale,cloth_guidance_scale,steps,height,width):
-        # tokens = clip.tokenize("")
-        # cond, _ = clip.encode_from_tokens(tokens, return_pooled=True)
-        
+    def run_oms(self,cloth_latent, model,clip,positive,negative,seed,scale,cloth_guidance_scale,steps,height,width):
+        tokens = clip.tokenize("")
+        cond, _ = clip.encode_from_tokens(tokens, return_pooled=True)
         num_samples = 1
-        prompt_embeds_null = None
-        gen_latent["samples"] = model.generate(cloth_latent["samples"],gen_latent["samples"], prompt_embeds_null,None, None, num_samples, seed, scale, cloth_guidance_scale, steps, height, width)
-        return (gen_latent,)
+        prompt_embeds_null = cond
+        cloth_latent["samples"] = model.generate(cloth_latent["samples"],None, prompt_embeds_null,positive[0][0], negative[0][0], num_samples, seed, scale, cloth_guidance_scale, steps, height, width)
+        return (cloth_latent,)
 
 class LoadOmsNode:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),}}
+        return {"required":
+                {"magicClothingUnet": (folder_paths.get_filename_list("unet"), ),
+                 }
+                }
 
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("MODEL",)
@@ -227,10 +228,9 @@ class LoadOmsNode:
 
     CATEGORY = "loaders"
     
-    def run_oms(self, seed):
-        unet_path = folder_paths.get_full_path("unet", "oms_diffusion_768_200000.safetensors")
+    def run_oms(self, magicClothingUnet):
+        unet_path = folder_paths.get_full_path("unet", magicClothingUnet)
         pipe_path = "SG161222/Realistic_Vision_V4.0_noVAE"
-        # pipe_path = "/Users/apple/work/github/ComfyUI/models/checkpoints/SG161222/Realistic_Vision_V4.0_noVAE"
         pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,torch_dtype=torch.float16)
         pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
         full_net = ClothAdapter(pipe, unet_path, "cpu",True)
