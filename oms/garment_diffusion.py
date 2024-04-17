@@ -63,12 +63,15 @@ class ClothAdapter:
             gen_latents = 0.18215 * gen_latents
             gen_latents=gen_latents.to(self.device).to(dtype=self.pipe.dtype)
         cloth_latent=cloth_latent.to(self.device).to(dtype=self.pipe.dtype)
-        cloth_latent = 0.18215 * cloth_latent
         prompt_embeds_null = prompt_embeds_null.to(self.device).to(dtype=self.pipe.dtype)
         positive = positive.to(self.device).to(dtype=self.pipe.dtype)
         negative = negative.to(self.device).to(dtype=self.pipe.dtype)
         with torch.inference_mode():
             _timesteps = kwargs.get("_timesteps", 0)
+            _timesteps.__hash_log__("timestep")
+            cloth_latent.__hash_log__("latent_image")
+            prompt_embeds_null.__hash_log__("context")
+            cloth_latent = 0.18215 * cloth_latent
             self.ref_unet(torch.cat([cloth_latent] * num_images_per_prompt), _timesteps, torch.cat([prompt_embeds_null] * num_images_per_prompt), cross_attention_kwargs={"attn_store": self.attn_store})
 
         generator = torch.Generator(self.device).manual_seed(seed) if seed is not None else None

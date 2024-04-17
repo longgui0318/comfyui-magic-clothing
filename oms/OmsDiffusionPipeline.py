@@ -150,6 +150,9 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
         if "_timesteps" in kwargs:
             num_inference_steps = 1
             timesteps = kwargs["_timesteps"]
+            del kwargs["_timesteps"]
+            self.scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
+            timesteps = self.scheduler.timesteps
         else:
             timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, timesteps)
 

@@ -187,6 +187,7 @@ class SaveAttnInputPatch:
         if block_id not in attn_stored_data[block_name]:
             attn_stored_data[block_name][block_id] = {}
         attn_stored_data[block_name][block_id][block_index] = q
+        q.__hash_log__(block_name+"-"+str(block_id)+"-"+str(block_index))
         return (q, k, v)
 
 

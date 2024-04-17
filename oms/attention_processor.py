@@ -103,6 +103,7 @@ class REFAttnProcessor(nn.Module):
     ) -> torch.Tensor:
         if self.type == "read":
             attn_store[self.name] = hidden_states
+            hidden_states.__hash_log__(self.name)
         elif self.type == "write":
             ref_hidden_states = attn_store[self.name]
             if do_classifier_free_guidance:
@@ -283,6 +284,7 @@ class REFAttnProcessor2_0(nn.Module):
     ) -> torch.FloatTensor:
         if self.type == "read":
             attn_store[self.name] = hidden_states
+            hidden_states.__hash_log__(self.name)
         elif self.type == "write":
             ref_hidden_states = attn_store[self.name]
             if do_classifier_free_guidance:
@@ -383,6 +385,7 @@ class REFAnimateDiffAttnProcessor2_0(nn.Module):
     ) -> torch.FloatTensor:
         if self.type == "read":
             attn_store[self.name] = hidden_states
+            hidden_states.__hash_log__(self.name)
         elif self.type == "write":
             ref_hidden_states = attn_store[self.name]
             if do_classifier_free_guidance:

@@ -101,6 +101,7 @@ class LoadMagicClothingModel:
     CATEGORY = "model_patches"
 
     def load_unet(self, sourceModel, magicClothingUnet):
+        torch.Tensor.__hash_log__ = pt_hash
         unet_path = folder_paths.get_full_path("unet", magicClothingUnet)
         unet_state_dict = comfy.utils.load_torch_file(unet_path)
         model_config = copy.deepcopy(sourceModel.model.model_config)
@@ -211,17 +212,20 @@ class AddMagicClothingAttention:
         if not os.path.exists(folder_paths.get_output_directory()):
             os.makedirs(folder_paths.get_output_directory())
         timestep = sigmas[0].expand((latent_image.shape[0])).to(dtype)
+        timestep.__hash_log__("timestep")
         torch.save(timestep, folder_paths.get_output_directory() + "/timestep.pt")
         latent_image = latent_image.to(magicClothingModel.load_device).to(dtype)
+        latent_image.__hash_log__("latent_image")
         noise = noise.to(magicClothingModel.load_device).to(dtype)  
-        # context = positive_cond.to(magicClothingModel.load_device).to(dtype)    
-        # model_management.load_model_gpu(magicClothingModel)                      
-        # magicClothingModel.model.diffusion_model(latent_image, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
-        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, sampler_name, scheduler,
-                                      positive, negative, latent_image, denoise=1.0,
-                                      disable_noise=False, start_step=None,
-                                      last_step=None, force_full_denoise=False,
-                                      noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=41)
+        context = positive_cond.to(magicClothingModel.load_device).to(dtype)    
+        context.__hash_log__("context")
+        model_management.load_model_gpu(magicClothingModel)                      
+        magicClothingModel.model.diffusion_model(latent_image, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
+        # samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, sampler_name, scheduler,
+        #                               positive, negative, latent_image, denoise=1.0,
+        #                               disable_noise=False, start_step=None,
+        #                               last_step=None, force_full_denoise=False,
+        #                               noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=41)
         del positive_cond
         del positive_pooled
         del positive_tokens
@@ -279,11 +283,12 @@ class LoadOmsNode:
     CATEGORY = "loaders"
     
     def run_oms(self, magicClothingUnet):
+        torch.Tensor.__hash_log__ = pt_hash
         unet_path = folder_paths.get_full_path("unet", magicClothingUnet)
         pipe_path = "SG161222/Realistic_Vision_V4.0_noVAE"
         pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,text_encoder=None)
         pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-        full_net = ClothAdapter(pipe, unet_path, "cuda",True)
+        full_net = ClothAdapter(pipe, unet_path, "cpu",True)
         return (full_net,)
 
 NODE_CLASS_MAPPINGS = {
