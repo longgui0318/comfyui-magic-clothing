@@ -11,6 +11,7 @@ import comfy.model_detection
 import comfy.supported_models_base
 import comfy.taesd.taesd
 import comfy.ldm.modules.diffusionmodules.openaimodel
+import comfy.ldm.models.autoencoder
 import comfy.utils
 import comfy.sample
 import comfy.samplers
@@ -48,6 +49,24 @@ class AttnStoredExtra:
                     if x.extra is not None:
                         return x.extra
                 return None
+
+class VAEModeChoose:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                {"vae": ("VAE",),
+                 "mode": (["sample", "mode"],),
+                 }
+                }
+    RETURN_TYPES = ("VAE",)
+    FUNCTION = "choose_vae_mode"
+
+    CATEGORY = "model_patches"
+
+    def choose_vae_mode(self, vae, mode):
+        if isinstance(vae.first_stage_model.regularization, comfy.ldm.models.autoencoder.DiagonalGaussianRegularizer):
+            vae.first_stage_model.regularization.sample = mode == "sample"
+        return (vae,)
 
 class LoadMagicClothingModel:
     @classmethod
@@ -107,7 +126,6 @@ class AddMagicClothingAttention:
                 {"sourceModel": ("MODEL",),
                  "magicClothingModel": ("MODEL",),
                  "clip": ("CLIP", ),
-                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                  "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
                  "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
                  "feature_image": ("LATENT", ),
@@ -115,15 +133,14 @@ class AddMagicClothingAttention:
                  "feature_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
                  }
                 }
-    RETURN_TYPES = ("MODEL", "INT", comfy.samplers.KSampler.SAMPLERS,
-                    comfy.samplers.KSampler.SCHEDULERS)
-    RETURN_NAMES = ("MODEL", "SEED", "SAMPLER_NAME", "SCHEDULER")
+    RETURN_TYPES = ("MODEL",comfy.samplers.KSampler.SAMPLERS,comfy.samplers.KSampler.SCHEDULERS)
+    RETURN_NAMES = ("MODEL", "SAMPLERS","SCHEDULER")
     FUNCTION = "add_features"
 
     CATEGORY = "model_patches"
 
-    def add_features(self, sourceModel,magicClothingModel, clip, seed, sampler_name, scheduler, feature_image, enable_feature_guidance=True, feature_guidance_scale=2.5):
-        attn_stored_data = self.calculate_features(magicClothingModel,clip,seed, sampler_name, scheduler, feature_image)
+    def add_features(self, sourceModel,magicClothingModel, clip,sampler_name, scheduler, feature_image, enable_feature_guidance=True, feature_guidance_scale=2.5):
+        attn_stored_data = self.calculate_features(magicClothingModel,clip,sampler_name, scheduler, feature_image)
         attn_stored = {}
         attn_stored["enable_feature_guidance"] = enable_feature_guidance
         attn_stored["feature_guidance_scale"] = feature_guidance_scale
@@ -138,7 +155,7 @@ class AddMagicClothingAttention:
                     sourceModel.set_model_attn1_replace(ReplacePatch(), block_name, block_number, attention_index)
         self.inject_comfyui()
         sourceModel.model_options["transformer_options"]["attn_stored"] = attn_stored
-        return (sourceModel, seed, sampler_name, scheduler,)
+        return (sourceModel, sampler_name,scheduler,)
 
     def inject_comfyui(self):
         old_get_area_and_mult = comfy.samplers.get_area_and_mult
@@ -154,7 +171,7 @@ class AddMagicClothingAttention:
             return result
         comfy.samplers.get_area_and_mult = get_area_and_mult
 
-    def calculate_features(self,magicClothingModel, source_clip, seed, sampler_name, scheduler, feature_image):
+    def calculate_features(self,magicClothingModel, source_clip,sampler_name,scheduler, feature_image):
         magicClothingModel.set_model_attn1_patch(SaveAttnInputPatch())
         attn_stored = {}
         attn_stored["data"] = {}
@@ -164,29 +181,27 @@ class AddMagicClothingAttention:
         if latent_image.shape[0] > 1:
             latent_image = torch.chunk(latent_image, latent_image.shape[0])[0]
         noise = torch.zeros_like(latent_image)
-
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
-
         positive_tokens = source_clip.tokenize("")
         positive_cond, positive_pooled = source_clip.encode_from_tokens(
             positive_tokens, return_pooled=True)
         positive = [[positive_cond, {"pooled_output": positive_pooled}]]
         negative = []
-        sigmas = comfy.samplers.calculate_sigmas(magicClothingModel.model.model_sampling,scheduler,1).to(magicClothingModel.load_device)
+        # sigmas = comfy.samplers.calculate_sigmas(magicClothingModel.model.model_sampling,scheduler,1).to(magicClothingModel.load_device)
         
         dtype = magicClothingModel.model.get_dtype()
         
-        timestep = sigmas[0].expand((latent_image.shape[0])).to(dtype)
+        # timestep = sigmas[0].expand((latent_image.shape[0])).to(dtype)
         latent_image = latent_image.to(magicClothingModel.load_device).to(dtype)
         noise = noise.to(magicClothingModel.load_device).to(dtype)  
-        context = positive_cond.to(magicClothingModel.load_device).to(dtype)    
-        model_management.load_model_gpu(magicClothingModel)                      
-        magicClothingModel.model.diffusion_model(latent_image, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
-        # samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, sampler_name, scheduler,
-        #                               positive, negative, latent_image, denoise=1.0,
-        #                               disable_noise=False, start_step=None,
-        #                               last_step=None, force_full_denoise=False,
-        #                               noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=seed)
+        # context = positive_cond.to(magicClothingModel.load_device).to(dtype)    
+        # model_management.load_model_gpu(magicClothingModel)                      
+        # magicClothingModel.model.diffusion_model(latent_image, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
+        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, sampler_name, scheduler,
+                                      positive, negative, latent_image, denoise=1.0,
+                                      disable_noise=False, start_step=None,
+                                      last_step=None, force_full_denoise=False,
+                                      noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=41)
         del positive_cond
         del positive_pooled
         del positive_tokens
@@ -220,7 +235,7 @@ class RunOmsNode:
         cond, _ = clip.encode_from_tokens(tokens, return_pooled=True)
         num_samples = 1
         prompt_embeds_null = cond
-        cloth_latent["samples"] = model.generate(cloth_latent["samples"],None, prompt_embeds_null,positive[0][0], negative[0][0], num_samples, seed, scale, cloth_guidance_scale, steps, height, width)
+        cloth_latent["samples"] = model.generate(cloth_latent["samples"],None, prompt_embeds_null,positive[0][0], negative[0][0], num_samples, seed, scale, cloth_guidance_scale, steps, height, width,timesteps=None)
         return (cloth_latent,)
 
 class LoadOmsNode:
@@ -240,12 +255,13 @@ class LoadOmsNode:
     def run_oms(self, magicClothingUnet):
         unet_path = folder_paths.get_full_path("unet", magicClothingUnet)
         pipe_path = "SG161222/Realistic_Vision_V4.0_noVAE"
-        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,torch_dtype=torch.float16)
+        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,text_encoder=None)
         pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
         full_net = ClothAdapter(pipe, unet_path, "cuda",True)
         return (full_net,)
 
 NODE_CLASS_MAPPINGS = {
+    "VAE Mode Choose": VAEModeChoose,
     "Load Magic Clothing Model": LoadMagicClothingModel,
     "Add Magic Clothing Attention": AddMagicClothingAttention,
     "RUN OMS": RunOmsNode,
@@ -253,6 +269,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "VAE Mode Choose":"VAE Mode Choose",
     "Load Magic Clothing Model": "Load Magic Clothing Model",
     "Add Magic Clothing Attention": "Add Magic Clothing Attention",
     "RUN OMS": "RUN OMS",
