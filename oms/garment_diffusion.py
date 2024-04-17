@@ -68,7 +68,8 @@ class ClothAdapter:
         positive = positive.to(self.device).to(dtype=self.pipe.dtype)
         negative = negative.to(self.device).to(dtype=self.pipe.dtype)
         with torch.inference_mode():
-            self.ref_unet(torch.cat([cloth_latent] * num_images_per_prompt), 0, torch.cat([prompt_embeds_null] * num_images_per_prompt), cross_attention_kwargs={"attn_store": self.attn_store})
+            _timesteps = kwargs.get("_timesteps", 0)
+            self.ref_unet(torch.cat([cloth_latent] * num_images_per_prompt), _timesteps, torch.cat([prompt_embeds_null] * num_images_per_prompt), cross_attention_kwargs={"attn_store": self.attn_store})
 
         generator = torch.Generator(self.device).manual_seed(seed) if seed is not None else None
         if self.enable_cloth_guidance:

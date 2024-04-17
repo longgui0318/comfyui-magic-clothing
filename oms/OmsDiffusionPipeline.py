@@ -147,8 +147,12 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
 
 
         # 4. Prepare timesteps
-        timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, timesteps)
-        
+        if "_timesteps" in kwargs:
+            num_inference_steps = 1
+            timesteps = kwargs["_timesteps"]
+        else:
+            timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, timesteps)
+
         # 5. Prepare latent variables
         num_channels_latents = self.unet.config.in_channels
         latents = self.prepare_latents(

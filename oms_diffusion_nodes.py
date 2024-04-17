@@ -1,6 +1,7 @@
 import copy
 import torch
 import folder_paths
+import os
 
 import comfy.ops
 import comfy.model_patcher
@@ -16,6 +17,7 @@ import comfy.utils
 import comfy.sample
 import comfy.samplers
 
+from .utils import pt_hash
 from comfy import model_management
 from .attn_handler import SaveAttnInputPatch, InputPatch, ReplacePatch, UnetFunctionWrapper, SamplerCfgFunctionWrapper
 
@@ -67,6 +69,22 @@ class VAEModeChoose:
         if isinstance(vae.first_stage_model.regularization, comfy.ldm.models.autoencoder.DiagonalGaussianRegularizer):
             vae.first_stage_model.regularization.sample = mode == "sample"
         return (vae,)
+    
+class InjectTensorHashLog:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                {"enable": ("BOOLEAN", {"default": True}),
+                 }
+                }
+    RETURN_TYPES = ("INT",)
+    FUNCTION = "inject"
+
+    CATEGORY = "model_patches"
+
+    def inject(self,enable):
+        torch.Tensor.__hash_log__ = pt_hash
+        return (0,)
 
 class LoadMagicClothingModel:
     @classmethod
@@ -187,11 +205,13 @@ class AddMagicClothingAttention:
             positive_tokens, return_pooled=True)
         positive = [[positive_cond, {"pooled_output": positive_pooled}]]
         negative = []
-        # sigmas = comfy.samplers.calculate_sigmas(magicClothingModel.model.model_sampling,scheduler,1).to(magicClothingModel.load_device)
+        sigmas = comfy.samplers.calculate_sigmas(magicClothingModel.model.model_sampling,scheduler,1).to(magicClothingModel.load_device)
         
         dtype = magicClothingModel.model.get_dtype()
-        
-        # timestep = sigmas[0].expand((latent_image.shape[0])).to(dtype)
+        if not os.path.exists(folder_paths.get_output_directory()):
+            os.makedirs(folder_paths.get_output_directory())
+        timestep = sigmas[0].expand((latent_image.shape[0])).to(dtype)
+        torch.save(timestep, folder_paths.get_output_directory() + "/timestep.pt")
         latent_image = latent_image.to(magicClothingModel.load_device).to(dtype)
         noise = noise.to(magicClothingModel.load_device).to(dtype)  
         # context = positive_cond.to(magicClothingModel.load_device).to(dtype)    
@@ -235,7 +255,13 @@ class RunOmsNode:
         cond, _ = clip.encode_from_tokens(tokens, return_pooled=True)
         num_samples = 1
         prompt_embeds_null = cond
-        cloth_latent["samples"] = model.generate(cloth_latent["samples"],None, prompt_embeds_null,positive[0][0], negative[0][0], num_samples, seed, scale, cloth_guidance_scale, steps, height, width,timesteps=None)
+        timestep = None
+        timestep_file = folder_paths.get_output_directory() + "/timestep.pt"
+        #判断文件是否存在
+        if os.path.exists(timestep_file):
+            timestep = torch.load(timestep_file)
+        
+        cloth_latent["samples"] = model.generate(cloth_latent["samples"],None, prompt_embeds_null,positive[0][0], negative[0][0], num_samples, seed, scale, cloth_guidance_scale, steps, height, width,_timesteps=timestep)
         return (cloth_latent,)
 
 class LoadOmsNode:
@@ -261,6 +287,7 @@ class LoadOmsNode:
         return (full_net,)
 
 NODE_CLASS_MAPPINGS = {
+    "InjectTensorHashLog":InjectTensorHashLog,
     "VAE Mode Choose": VAEModeChoose,
     "Load Magic Clothing Model": LoadMagicClothingModel,
     "Add Magic Clothing Attention": AddMagicClothingAttention,
@@ -269,6 +296,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "InjectTensorHashLog":"InjectTensorHashLog",
     "VAE Mode Choose":"VAE Mode Choose",
     "Load Magic Clothing Model": "Load Magic Clothing Model",
     "Add Magic Clothing Attention": "Add Magic Clothing Attention",

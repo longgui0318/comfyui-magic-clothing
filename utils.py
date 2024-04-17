@@ -1,3 +1,5 @@
+import hashlib
+
 def handle_block_info(block_key, detection_unet_diffusers_keys, type="attn1"):
     block_weight_key = block_key[:block_key.find(type)+len(type)]
     real_key = None
@@ -48,3 +50,16 @@ def clean_attn_stored_memory(attn_stored):
 def del_key_if_exists(obj,key):
     if key in obj:
         del obj[key]
+
+
+def pt_hash(self,key=None):
+    data = self.numpy()
+    if not data.flags['C_CONTIGUOUS']:
+        data = data.copy(order='C')
+    has_object = hashlib.sha256(data)
+    has_value = has_object.hexdigest()
+    del has_object
+    del data
+    if key is not None:
+        print(f"Debug Test: {key}====={has_value}")
+    return has_value
