@@ -134,11 +134,6 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
 
         device = self._execution_device
 
-        # 3. Encode input prompt
-        lora_scale = (
-            self.cross_attention_kwargs.get("scale", None) if self.cross_attention_kwargs is not None else None
-        )
-
         # For classifier free guidance, we need to do two forward passes.
         # Here we concatenate the unconditional and text embeddings into a single batch
         # to avoid doing two forward passes
@@ -147,14 +142,8 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
 
 
         # 4. Prepare timesteps
-        if "_timesteps" in kwargs:
-            num_inference_steps = 1
-            timesteps = kwargs["_timesteps"]
-            del kwargs["_timesteps"]
-            self.scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
-            timesteps = self.scheduler.timesteps
-        else:
-            timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, timesteps)
+        timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, timesteps)
+
 
         # 5. Prepare latent variables
         num_channels_latents = self.unet.config.in_channels
@@ -235,11 +224,8 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
                         callback(step_idx, t, latents)
 
   
-
+        image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False, generator=generator)[0]
         # Offload all models
         self.maybe_free_model_hooks()
-        latents = 1.0/0.18215 * latents
-        if not return_dict:
-            return (latents,)
-
-        return StableDiffusionPipelineOutput(images=latents, nsfw_content_detected=None)
+        # latents = 1.0/0.18215 * latents
+        return image

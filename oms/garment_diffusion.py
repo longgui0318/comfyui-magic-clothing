@@ -67,14 +67,12 @@ class ClothAdapter:
         positive = positive.to(self.device).to(dtype=self.pipe.dtype)
         negative = negative.to(self.device).to(dtype=self.pipe.dtype)
         with torch.inference_mode():
-            _timesteps = kwargs.get("_timesteps", 0)
-            _timesteps.__hash_log__("timestep")
             cloth_latent.__hash_log__("latent_image")
             prompt_embeds_null.__hash_log__("context")
             cloth_latent = 0.18215 * cloth_latent
-            self.ref_unet(torch.cat([cloth_latent] * num_images_per_prompt), _timesteps, torch.cat([prompt_embeds_null] * num_images_per_prompt), cross_attention_kwargs={"attn_store": self.attn_store})
+            self.ref_unet(torch.cat([cloth_latent] * num_images_per_prompt), 0, torch.cat([prompt_embeds_null] * num_images_per_prompt), cross_attention_kwargs={"attn_store": self.attn_store})
 
-        generator = torch.Generator(self.device).manual_seed(seed) if seed is not None else None
+        self.generator = torch.Generator(self.device).manual_seed(seed) if seed is not None else None
         if self.enable_cloth_guidance:
             images = self.pipe(
                 prompt_embeds=positive,
@@ -83,7 +81,7 @@ class ClothAdapter:
                 cloth_guidance_scale=cloth_guidance_scale,
                 num_inference_steps=num_inference_steps,
                 latents = gen_latents,
-                generator=generator,
+                generator=self.generator,
                 height=height,
                 width=width,
                 cross_attention_kwargs={"attn_store": self.attn_store, "do_classifier_free_guidance": guidance_scale > 1.0, "enable_cloth_guidance": self.enable_cloth_guidance},
@@ -95,7 +93,7 @@ class ClothAdapter:
                 negative_prompt_embeds=negative,
                 guidance_scale=guidance_scale,
                 num_inference_steps=num_inference_steps,
-                generator=generator,
+                generator=self.generator,
                 latents = gen_latents,
                 height=height,
                 width=width,

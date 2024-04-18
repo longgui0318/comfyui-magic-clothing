@@ -235,38 +235,49 @@ class AddMagicClothingAttention:
 class RunOmsNode:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"cloth_latent": ("LATENT",),
+        return {"required": {"cloth_image": ("IMAGE",),
                              "model": ("MODEL",),
-                             "clip": ("CLIP", ),
-                             "positive": ("CONDITIONING", ),
-                             "negative": ("CONDITIONING", ),
+                            #  "clip": ("CLIP", ),
+                            #  "positive": ("CONDITIONING", ),
+                            #  "negative": ("CONDITIONING", ),
                              "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                              "scale": ("FLOAT", {"default": 5, "min": 0.0, "max": 10.0,"step": 0.01}),
                              "cloth_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 10.0,"step": 0.01}),
                              "steps": ("INT", {"default": 25, "min": 0, "max": 100}),
                              "height": ("INT", {"default": 768, "min": 0, "max": 2048}),
-                             "width": ("INT", {"default": 512, "min": 0, "max": 2048}),
+                             "width": ("INT", {"default": 576, "min": 0, "max": 2048}),
                              }
                 }
 
-    RETURN_TYPES = ("LATENT",)
+    RETURN_TYPES = ("IMAGE",)
     FUNCTION = "run_oms"
 
     CATEGORY = "loaders"
     
-    def run_oms(self,cloth_latent, model,clip,positive,negative,seed,scale,cloth_guidance_scale,steps,height,width):
-        tokens = clip.tokenize("")
-        cond, _ = clip.encode_from_tokens(tokens, return_pooled=True)
-        num_samples = 1
-        prompt_embeds_null = cond
-        timestep = None
+    def run_oms(self,cloth_image, model,seed,scale,cloth_guidance_scale,steps,height,width):
+        prompt_embeds_null = model.pipe.encode_prompt([""], device=model.pipe.device, num_images_per_prompt=1, do_classifier_free_guidance=False)[0]
+        prompt_embeds, negative_prompt_embeds = model.pipe.encode_prompt(
+            "a photography of a model,best quality, high quality",
+            model.pipe.device,
+            1,
+            True,
+            "bare, monochrome, lowres, bad anatomy, worst quality, low quality",
+            prompt_embeds=None,
+            negative_prompt_embeds=None,
+            lora_scale=None,
+            clip_skip=None,
+        )
         timestep_file = folder_paths.get_output_directory() + "/timestep.pt"
         #判断文件是否存在
         if os.path.exists(timestep_file):
             timestep = torch.load(timestep_file)
-        
-        cloth_latent["samples"] = model.generate(cloth_latent["samples"],None, prompt_embeds_null,positive[0][0], negative[0][0], num_samples, seed, scale, cloth_guidance_scale, steps, height, width,_timesteps=timestep)
-        return (cloth_latent,)
+        cloth_image = cloth_image.permute(0, 3, 1, 2)
+        cloth_image = cloth_image.to(dtype=torch.float32)
+        cloth_latent = {}
+        cloth_latent["samples"] = model.pipe.vae.encode(cloth_image).latent_dist.mode()
+        gen_image = model.generate(cloth_latent["samples"],None, prompt_embeds_null,prompt_embeds, negative_prompt_embeds, 1, seed, scale, cloth_guidance_scale, steps, height, width)
+        gen_image = gen_image[0].permute(0, 2, 3, 1)
+        return (gen_image,)
 
 class LoadOmsNode:
     @classmethod
@@ -286,7 +297,7 @@ class LoadOmsNode:
         torch.Tensor.__hash_log__ = pt_hash
         unet_path = folder_paths.get_full_path("unet", magicClothingUnet)
         pipe_path = "SG161222/Realistic_Vision_V4.0_noVAE"
-        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,text_encoder=None)
+        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path)
         pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
         full_net = ClothAdapter(pipe, unet_path, "cpu",True)
         return (full_net,)
