@@ -86,7 +86,7 @@ class ClothAdapter:
                 width=width,
                 cross_attention_kwargs={"attn_store": self.attn_store, "do_classifier_free_guidance": guidance_scale > 1.0, "enable_cloth_guidance": self.enable_cloth_guidance},
                 **kwargs,
-            ).images
+            )
         else:
             images = self.pipe(
                 prompt_embeds=positive,
@@ -99,6 +99,6 @@ class ClothAdapter:
                 width=width,
                 cross_attention_kwargs={"attn_store": self.attn_store, "do_classifier_free_guidance": guidance_scale > 1.0, "enable_cloth_guidance": self.enable_cloth_guidance},
                 **kwargs,
-            ).images
+            )
 
         return images
