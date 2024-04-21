@@ -53,7 +53,7 @@ def del_key_if_exists(obj,key):
 
 
 def pt_hash(self,key=None):
-    data = self.numpy()
+    data = self.cpu().numpy()
     if not data.flags['C_CONTIGUOUS']:
         data = data.copy(order='C')
     has_object = hashlib.sha256(data)

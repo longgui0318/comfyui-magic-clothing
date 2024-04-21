@@ -2,7 +2,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import *
 
 
 class OmsDiffusionPipeline(StableDiffusionPipeline):
-    @torch.no_grad()
+    @torch.inference_mode
     def __call__(
             self,
             prompt: Union[str, List[str]] = None,
@@ -134,6 +134,9 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
 
         device = self._execution_device
 
+        prompt_embeds.__hash_log__("生成-正向提示词")
+        negative_prompt_embeds.__hash_log__("生成-正向提示词")
+
         # For classifier free guidance, we need to do two forward passes.
         # Here we concatenate the unconditional and text embeddings into a single batch
         # to avoid doing two forward passes
@@ -157,6 +160,7 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
             generator,
             None,
         )
+        latents.__hash_log__("生成-潜空间(预)")
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
@@ -179,7 +183,8 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 3) if self.do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
-
+                latent_model_input.__hash_log__("生成-潜空间(推)")
+                t.__hash_log__("生成-时间步(推)")
                 # predict the noise residual
                 noise_pred = self.unet(
                     latent_model_input,
@@ -189,7 +194,7 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
                     cross_attention_kwargs=self.cross_attention_kwargs,
                     return_dict=False,
                 )[0]
-
+                noise_pred.__hash_log__("生成-单步结果(推)")
                 # perform guidance
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_cloth, noise_pred_text = noise_pred.chunk(3)
@@ -198,14 +203,16 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
                         + guidance_scale * (noise_pred_text - noise_pred_cloth)
                         + cloth_guidance_scale * (noise_pred_cloth - noise_pred_uncond)
                     )
+                    noise_pred.__hash_log__("生成-单步结果CFG(推)")
 
                 if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
                     # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
                     noise_pred = rescale_noise_cfg(noise_pred, noise_pred_text, guidance_rescale=self.guidance_rescale)
+                    noise_pred.__hash_log__("生成-单步结果RCFG(推)")
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
-
+                latents.__hash_log__("生成-潜变量调度(推)")
                 if callback_on_step_end is not None:
                     callback_kwargs = {}
                     for k in callback_on_step_end_tensor_inputs:
@@ -223,9 +230,7 @@ class OmsDiffusionPipeline(StableDiffusionPipeline):
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
 
-  
-        image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False, generator=generator)[0]
         # Offload all models
         self.maybe_free_model_hooks()
-        # latents = 1.0/0.18215 * latents
-        return image
+        latents = 1.0/0.18215 * latents
+        return latents

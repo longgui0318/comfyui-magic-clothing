@@ -2,6 +2,7 @@ import copy
 import torch
 import folder_paths
 import os
+import numpy as np
 
 import comfy.ops
 import comfy.model_patcher
@@ -17,14 +18,17 @@ import comfy.utils
 import comfy.sample
 import comfy.samplers
 
+from PIL import Image
 from .utils import pt_hash
 from comfy import model_management
 from .attn_handler import SaveAttnInputPatch, InputPatch, ReplacePatch, UnetFunctionWrapper, SamplerCfgFunctionWrapper
 
-from diffusers import UniPCMultistepScheduler
+from diffusers import UniPCMultistepScheduler,AutoencoderKL
+from diffusers.pipelines import StableDiffusionPipeline
 
 from .oms.garment_diffusion import ClothAdapter
 from .oms.OmsDiffusionPipeline import OmsDiffusionPipeline
+from .oms.utils import prepare_image
 class AttnStoredExtra:
     def __init__(self,extra) -> None:
         if isinstance(extra, torch.Tensor):
@@ -85,6 +89,28 @@ class InjectTensorHashLog:
     def inject(self,enable):
         torch.Tensor.__hash_log__ = pt_hash
         return (0,)
+    
+class ChangePixelValueNormalization:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": 
+                { "pixels": ("IMAGE", ),
+                  "mode": (["[0,1]=>[-1,1]", "[-1,1]=>[0,1]"],),            
+                 }
+                }
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "normalization"
+
+    CATEGORY = "image"
+
+    def normalization(self,pixels,mode):
+        if mode == "[0,1]=>[-1,1]":
+            pixels = (pixels * 255).round().clamp(min=0,max=255) / 127.5 - 1.0
+        elif mode == "[-1,1]=>[0,1]":
+            pixels = ((pixels+1) * 127.5).clamp(min=0,max=255) / 255.0
+        else:
+            pixels = pixels
+        return (pixels,)
 
 class LoadMagicClothingModel:
     @classmethod
@@ -199,33 +225,30 @@ class AddMagicClothingAttention:
         latent_image = feature_image["samples"]
         if latent_image.shape[0] > 1:
             latent_image = torch.chunk(latent_image, latent_image.shape[0])[0]
-        noise = torch.zeros_like(latent_image)
+        noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
         positive_tokens = source_clip.tokenize("")
         positive_cond, positive_pooled = source_clip.encode_from_tokens(
             positive_tokens, return_pooled=True)
         positive = [[positive_cond, {"pooled_output": positive_pooled}]]
         negative = []
-        sigmas = comfy.samplers.calculate_sigmas(magicClothingModel.model.model_sampling,scheduler,1).to(magicClothingModel.load_device)
+        # sigmas = comfy.samplers.calculate_sigmas(magicClothingModel.model.model_sampling,scheduler,1).to(magicClothingModel.load_device)
         
         dtype = magicClothingModel.model.get_dtype()
-        if not os.path.exists(folder_paths.get_output_directory()):
-            os.makedirs(folder_paths.get_output_directory())
-        timestep = sigmas[0].expand((latent_image.shape[0])).to(dtype)
-        timestep.__hash_log__("timestep")
-        torch.save(timestep, folder_paths.get_output_directory() + "/timestep.pt")
+        # if not os.path.exists(folder_paths.get_output_directory()):
+        #     os.makedirs(folder_paths.get_output_directory())
+        # timestep = sigmas[0].expand((latent_image.shape[0])).to(dtype)
         latent_image = latent_image.to(magicClothingModel.load_device).to(dtype)
-        latent_image.__hash_log__("latent_image")
         noise = noise.to(magicClothingModel.load_device).to(dtype)  
-        context = positive_cond.to(magicClothingModel.load_device).to(dtype)    
-        context.__hash_log__("context")
-        model_management.load_model_gpu(magicClothingModel)                      
-        magicClothingModel.model.diffusion_model(latent_image, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
-        # samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, sampler_name, scheduler,
-        #                               positive, negative, latent_image, denoise=1.0,
-        #                               disable_noise=False, start_step=None,
-        #                               last_step=None, force_full_denoise=False,
-        #                               noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=41)
+        # context = positive_cond.to(magicClothingModel.load_device).to(dtype)    
+        # model_management.load_model_gpu(magicClothingModel)                      
+        # magicClothingModel.model.diffusion_model(latent_image, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
+        sigmas = torch.tensor([1,0])
+        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, sampler_name, scheduler,
+                                      positive, negative, latent_image, denoise=1.0,
+                                      disable_noise=False, start_step=None,
+                                      last_step=None, force_full_denoise=False,sigmas=sigmas,
+                                      noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=41)
         del positive_cond
         del positive_pooled
         del positive_tokens
@@ -240,7 +263,7 @@ class RunOmsNode:
                             #  "clip": ("CLIP", ),
                             #  "positive": ("CONDITIONING", ),
                             #  "negative": ("CONDITIONING", ),
-                             "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                             "seed": ("INT", {"default": 1234, "min": 0, "max": 0xffffffffffffffff}),
                              "scale": ("FLOAT", {"default": 5, "min": 0.0, "max": 10.0,"step": 0.01}),
                              "cloth_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 10.0,"step": 0.01}),
                              "steps": ("INT", {"default": 25, "min": 0, "max": 100}),
@@ -255,28 +278,43 @@ class RunOmsNode:
     CATEGORY = "loaders"
     
     def run_oms(self,cloth_image, model,seed,scale,cloth_guidance_scale,steps,height,width):
-        prompt_embeds_null = model.pipe.encode_prompt([""], device=model.pipe.device, num_images_per_prompt=1, do_classifier_free_guidance=False)[0]
-        prompt_embeds, negative_prompt_embeds = model.pipe.encode_prompt(
-            "a photography of a model,best quality, high quality",
-            model.pipe.device,
-            1,
-            True,
-            "bare, monochrome, lowres, bad anatomy, worst quality, low quality",
-            prompt_embeds=None,
-            negative_prompt_embeds=None,
-            lora_scale=None,
-            clip_skip=None,
-        )
-        timestep_file = folder_paths.get_output_directory() + "/timestep.pt"
-        #判断文件是否存在
-        if os.path.exists(timestep_file):
-            timestep = torch.load(timestep_file)
-        cloth_image = cloth_image.permute(0, 3, 1, 2)
-        cloth_image = cloth_image.to(dtype=torch.float32)
-        cloth_latent = {}
-        cloth_latent["samples"] = model.pipe.vae.encode(cloth_image).latent_dist.mode()
+        # seed = 1234
+        # width = 96
+        # height = 96
+        # steps = 1
+        # cloth_image =  (cloth_image * 255).round().clamp(min=0,max=255).to(dtype=torch.float32)  / 255.0
+        cloth_image =  (cloth_image * 255).round().clamp(min=0,max=255).to(dtype=torch.float32)  / 127.5 - 1.0
+        cloth_image =  cloth_image.permute(0,3,1,2)
+        if not isinstance(model,ClothAdapter):
+            gen_image = cloth_image.permute(0, 2, 3, 1)
+            gen_image = ((gen_image+1) * 127.5).clamp(min=0,max=255).to(dtype=torch.float32) / 255.0
+            return (gen_image,)
+        cloth_image =  cloth_image.to(model.device, dtype=model.pipe.dtype)
+        cloth_image.__hash_log__("特征提取-衣服")
+        with torch.inference_mode():
+            prompt_embeds_null = model.pipe.encode_prompt([""], device=model.pipe.device, num_images_per_prompt=1, do_classifier_free_guidance=False)[0]
+            prompt_embeds_null.__hash_log__("特征提取-空提示")
+            prompt_embeds, negative_prompt_embeds = model.pipe.encode_prompt(
+                "a photography of a model,best quality, high quality",
+                model.pipe.device,
+                1,
+                True,
+                "bare, monochrome, lowres, bad anatomy, worst quality, low quality",
+                prompt_embeds=None,
+                negative_prompt_embeds=None,
+                lora_scale=None,
+                clip_skip=None,
+            )
+            cloth_latent = {}
+            cloth_latent["samples"] = model.pipe.vae.encode(cloth_image).latent_dist.mode()
         gen_image = model.generate(cloth_latent["samples"],None, prompt_embeds_null,prompt_embeds, negative_prompt_embeds, 1, seed, scale, cloth_guidance_scale, steps, height, width)
-        gen_image = gen_image[0].permute(0, 2, 3, 1)
+        with torch.inference_mode():
+            gen_image = model.pipe.vae.decode(gen_image, return_dict=False, generator=model.generator)[0]
+        gen_image.__hash_log__("生成-图像(完)")
+        gen_image = gen_image.permute(0, 2, 3, 1)
+        # gen_image = (gen_image * 255.0).clamp(min=0,max=255).to(dtype=torch.float32) / 255.0
+
+        gen_image = ((gen_image+1) * 127.5).clamp(min=0,max=255).to(dtype=torch.float32) / 255.0
         return (gen_image,)
 
 class LoadOmsNode:
@@ -295,16 +333,21 @@ class LoadOmsNode:
     
     def run_oms(self, magicClothingUnet):
         torch.Tensor.__hash_log__ = pt_hash
+        if "768" in magicClothingUnet:
+            return ({},)
         unet_path = folder_paths.get_full_path("unet", magicClothingUnet)
+        unet_path = "C:\\Users\\Administrator\\.cache\\models\\oms_diffusion_768_200000.safetensors"
         pipe_path = "SG161222/Realistic_Vision_V4.0_noVAE"
-        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path)
+        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(dtype=torch.float16)
+        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,vae=vae,torch_dtype=torch.float16)
         pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-        full_net = ClothAdapter(pipe, unet_path, "cpu",True)
+        full_net = ClothAdapter(pipe, unet_path, "cuda",True)
         return (full_net,)
 
 NODE_CLASS_MAPPINGS = {
     "InjectTensorHashLog":InjectTensorHashLog,
     "VAE Mode Choose": VAEModeChoose,
+    "Change Pixel Value Normalization":ChangePixelValueNormalization,
     "Load Magic Clothing Model": LoadMagicClothingModel,
     "Add Magic Clothing Attention": AddMagicClothingAttention,
     "RUN OMS": RunOmsNode,
@@ -314,6 +357,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "InjectTensorHashLog":"InjectTensorHashLog",
     "VAE Mode Choose":"VAE Mode Choose",
+    "Change Pixel Value Normalization":"Change Pixel Value Normalization",
     "Load Magic Clothing Model": "Load Magic Clothing Model",
     "Add Magic Clothing Attention": "Add Magic Clothing Attention",
     "RUN OMS": "RUN OMS",

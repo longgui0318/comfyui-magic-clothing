@@ -11,21 +11,20 @@ if is_torch2_available():
     from .attention_processor import REFAnimateDiffAttnProcessor2_0 as REFAnimateDiffAttnProcessor
 else:
     from .attention_processor import REFAttnProcessor, AttnProcessor
-
+import torch.nn.functional as F
 
 class ClothAdapter:
     def __init__(self, sd_pipe, ref_path, device, enable_cloth_guidance):
         self.enable_cloth_guidance = enable_cloth_guidance
         self.device = device
         self.pipe = sd_pipe.to(self.device)
+        
         self.set_adapter(self.pipe.unet, "write")
-
         ref_unet = copy.deepcopy(sd_pipe.unet)
         if ref_unet.config.in_channels == 9:
             ref_unet.conv_in = torch.nn.Conv2d(4, 320, ref_unet.conv_in.kernel_size, ref_unet.conv_in.stride, ref_unet.conv_in.padding)
             ref_unet.register_to_config(in_channels=4)
         state_dict = {}
-        hash_v1 = {}
         with safe_open(ref_path, framework="pt", device="cpu") as f:
             for key in f.keys():
                 state_dict[key] = f.get_tensor(key)
@@ -66,11 +65,11 @@ class ClothAdapter:
         prompt_embeds_null = prompt_embeds_null.to(self.device).to(dtype=self.pipe.dtype)
         positive = positive.to(self.device).to(dtype=self.pipe.dtype)
         negative = negative.to(self.device).to(dtype=self.pipe.dtype)
+        cloth_latent = 0.18215 * cloth_latent
+        cloth_latent.__hash_log__("特征提取-衣服潜变量")
         with torch.inference_mode():
-            cloth_latent.__hash_log__("latent_image")
-            prompt_embeds_null.__hash_log__("context")
-            cloth_latent = 0.18215 * cloth_latent
             self.ref_unet(torch.cat([cloth_latent] * num_images_per_prompt), 0, torch.cat([prompt_embeds_null] * num_images_per_prompt), cross_attention_kwargs={"attn_store": self.attn_store})
+        
 
         self.generator = torch.Generator(self.device).manual_seed(seed) if seed is not None else None
         if self.enable_cloth_guidance:
