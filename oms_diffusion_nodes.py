@@ -17,6 +17,7 @@ import comfy.ldm.models.autoencoder
 import comfy.utils
 import comfy.sample
 import comfy.samplers
+import comfy.sampler_helpers
 
 from PIL import Image
 from .utils import pt_hash
@@ -171,21 +172,21 @@ class AddMagicClothingAttention:
                 {"sourceModel": ("MODEL",),
                  "magicClothingModel": ("MODEL",),
                  "clip": ("CLIP", ),
-                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
-                 "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
                  "feature_image": ("LATENT", ),
                  "enable_feature_guidance": ("BOOLEAN", {"default": True}),
+                 "noise": ("FLOAT", {"default": 0, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
+                 "sigma": ("FLOAT", {"default": 1, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
                  "feature_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
                  }
                 }
-    RETURN_TYPES = ("MODEL",comfy.samplers.KSampler.SAMPLERS,comfy.samplers.KSampler.SCHEDULERS)
-    RETURN_NAMES = ("MODEL", "SAMPLERS","SCHEDULER")
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("MODEL",)
     FUNCTION = "add_features"
 
     CATEGORY = "model_patches"
 
-    def add_features(self, sourceModel,magicClothingModel, clip,sampler_name, scheduler, feature_image, enable_feature_guidance=True, feature_guidance_scale=2.5):
-        attn_stored_data = self.calculate_features(magicClothingModel,clip,sampler_name, scheduler, feature_image)
+    def add_features(self, sourceModel,magicClothingModel, clip, feature_image, enable_feature_guidance=True, noise = 0,sigma=1,feature_guidance_scale=2.5):
+        attn_stored_data = self.calculate_features_zj(magicClothingModel,clip, feature_image,noise,sigma)
         attn_stored = {}
         attn_stored["enable_feature_guidance"] = enable_feature_guidance
         attn_stored["feature_guidance_scale"] = feature_guidance_scale
@@ -200,7 +201,7 @@ class AddMagicClothingAttention:
                     sourceModel.set_model_attn1_replace(ReplacePatch(), block_name, block_number, attention_index)
         self.inject_comfyui()
         sourceModel.model_options["transformer_options"]["attn_stored"] = attn_stored
-        return (sourceModel, sampler_name,scheduler,)
+        return (sourceModel,)
 
     def inject_comfyui(self):
         old_get_area_and_mult = comfy.samplers.get_area_and_mult
@@ -216,7 +217,7 @@ class AddMagicClothingAttention:
             return result
         comfy.samplers.get_area_and_mult = get_area_and_mult
 
-    def calculate_features(self,magicClothingModel, source_clip,sampler_name,scheduler, feature_image):
+    def calculate_features(self,magicClothingModel, source_clip,feature_image,noise_scaling,sigma_scaling):
         magicClothingModel.set_model_attn1_patch(SaveAttnInputPatch())
         attn_stored = {}
         attn_stored["data"] = {}
@@ -226,25 +227,18 @@ class AddMagicClothingAttention:
         if latent_image.shape[0] > 1:
             latent_image = torch.chunk(latent_image, latent_image.shape[0])[0]
         noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+        noise = noise+noise_scaling
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
         positive_tokens = source_clip.tokenize("")
         positive_cond, positive_pooled = source_clip.encode_from_tokens(
             positive_tokens, return_pooled=True)
         positive = [[positive_cond, {"pooled_output": positive_pooled}]]
-        negative = []
-        # sigmas = comfy.samplers.calculate_sigmas(magicClothingModel.model.model_sampling,scheduler,1).to(magicClothingModel.load_device)
-        
+        negative = []        
         dtype = magicClothingModel.model.get_dtype()
-        # if not os.path.exists(folder_paths.get_output_directory()):
-        #     os.makedirs(folder_paths.get_output_directory())
-        # timestep = sigmas[0].expand((latent_image.shape[0])).to(dtype)
         latent_image = latent_image.to(magicClothingModel.load_device).to(dtype)
         noise = noise.to(magicClothingModel.load_device).to(dtype)  
-        # context = positive_cond.to(magicClothingModel.load_device).to(dtype)    
-        # model_management.load_model_gpu(magicClothingModel)                      
-        # magicClothingModel.model.diffusion_model(latent_image, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
-        sigmas = torch.tensor([1,0])
-        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, sampler_name, scheduler,
+        sigmas = torch.tensor([sigma_scaling,0])
+        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, "uni_pc", "karras",
                                       positive, negative, latent_image, denoise=1.0,
                                       disable_noise=False, start_step=None,
                                       last_step=None, force_full_denoise=False,sigmas=sigmas,
@@ -253,6 +247,37 @@ class AddMagicClothingAttention:
         del positive_pooled
         del positive_tokens
         latent_image = feature_image["samples"].to(model_management.unet_offload_device())
+        return attn_stored["data"]
+    
+    
+        
+    def calculate_features_zj(self,magicClothingModel, source_clip,feature_image,noise_scaling,sigma_scaling):
+        magicClothingModel.set_model_attn1_patch(SaveAttnInputPatch())
+        attn_stored = {}
+        attn_stored["data"] = {}
+        magicClothingModel.model_options["transformer_options"]["attn_stored"] = attn_stored
+
+        latent_image = feature_image["samples"]
+        if latent_image.shape[0] > 1:
+            latent_image = torch.chunk(latent_image, latent_image.shape[0])[0]
+        positive_tokens = source_clip.tokenize("")
+        positive_cond, positive_pooled = source_clip.encode_from_tokens(
+            positive_tokens, return_pooled=True)
+        dtype = magicClothingModel.model.get_dtype()
+        
+        latent_image = magicClothingModel.model.process_latent_in(latent_image).to(magicClothingModel.load_device)
+        context = positive_cond.to(magicClothingModel.load_device).to(dtype)   
+        sigmas = comfy.samplers.calculate_sigmas(magicClothingModel.model.model_sampling,"karras",1).to(magicClothingModel.load_device)
+        sigma =  sigmas[0].expand((latent_image.shape[0]))
+        timestep = sigma * 0
+        xc = magicClothingModel.model.model_sampling.calculate_input(sigma, latent_image).to(dtype)
+        model_management.load_model_gpu(magicClothingModel)                      
+        magicClothingModel.model.diffusion_model(xc, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
+        latent_image = feature_image["samples"].to(model_management.unet_offload_device())
+        comfy.sampler_helpers.cleanup_models({}, [magicClothingModel])
+        del positive_cond
+        del positive_pooled
+        del positive_tokens
         return attn_stored["data"]
 
 class RunOmsNode:
