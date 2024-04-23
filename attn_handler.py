@@ -192,6 +192,9 @@ class SaveAttnInputPatch:
 
 
 class InputPatch:
+    
+    def _calculate_input_(hideen_states, sigma):
+        return hideen_states / (sigma ** 2 + 1) ** 0.5
 
     def __call__(self, q, k, v, extra_options):
         if "attn_stored" in extra_options:
@@ -203,11 +206,13 @@ class InputPatch:
         block_name = extra_options["block"][0]
         block_id = extra_options["block"][1]
         block_index = extra_options["block_index"]
+        sigmas = extra_options["sigmas"]
         if block_name in attn_stored_data and block_id in attn_stored_data[block_name] and block_index in attn_stored_data[block_name][block_id]:
             FLAG_OUT_CHANNEL = 2
             qEQk = q.shape[FLAG_OUT_CHANNEL] == k.shape[FLAG_OUT_CHANNEL]
             qEQv = q.shape[FLAG_OUT_CHANNEL] == v.shape[FLAG_OUT_CHANNEL]
             feature_hidden_states = attn_stored_data[block_name][block_id][block_index]
+            # feature_hidden_states = self._calculate_input_(feature_hidden_states, sigmas)
             if q.shape[1] != feature_hidden_states.shape[1]:
                 clean_attn_stored_memory(attn_stored)
                 raise ValueError(
