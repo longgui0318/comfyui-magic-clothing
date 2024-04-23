@@ -1,35 +1,18 @@
 import copy
 import torch
 import folder_paths
-import os
-import numpy as np
 
-import comfy.ops
 import comfy.model_patcher
-import comfy.lora
-import comfy.t2i_adapter.adapter
-import comfy.model_base
-import comfy.model_detection
-import comfy.supported_models_base
-import comfy.taesd.taesd
-import comfy.ldm.modules.diffusionmodules.openaimodel
 import comfy.ldm.models.autoencoder
 import comfy.utils
 import comfy.sample
 import comfy.samplers
 import comfy.sampler_helpers
 
-from PIL import Image
 from .utils import pt_hash
 from comfy import model_management
 from .attn_handler import SaveAttnInputPatch, InputPatch, ReplacePatch, UnetFunctionWrapper, SamplerCfgFunctionWrapper
 
-from diffusers import UniPCMultistepScheduler,AutoencoderKL
-from diffusers.pipelines import StableDiffusionPipeline
-
-from .oms.garment_diffusion import ClothAdapter
-from .oms.OmsDiffusionPipeline import OmsDiffusionPipeline
-from .oms.utils import prepare_image
 class AttnStoredExtra:
     def __init__(self,extra) -> None:
         if isinstance(extra, torch.Tensor):
@@ -56,63 +39,7 @@ class AttnStoredExtra:
                     if x.extra is not None:
                         return x.extra
                 return None
-
-class VAEModeChoose:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required":
-                {"vae": ("VAE",),
-                 "mode": (["sample", "mode"],),
-                 }
-                }
-    RETURN_TYPES = ("VAE",)
-    FUNCTION = "choose_vae_mode"
-
-    CATEGORY = "model_patches"
-
-    def choose_vae_mode(self, vae, mode):
-        if isinstance(vae.first_stage_model.regularization, comfy.ldm.models.autoencoder.DiagonalGaussianRegularizer):
-            vae.first_stage_model.regularization.sample = mode == "sample"
-        return (vae,)
     
-class InjectTensorHashLog:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required":
-                {"enable": ("BOOLEAN", {"default": True}),
-                 }
-                }
-    RETURN_TYPES = ("INT",)
-    FUNCTION = "inject"
-
-    CATEGORY = "model_patches"
-
-    def inject(self,enable):
-        torch.Tensor.__hash_log__ = pt_hash
-        return (0,)
-    
-class ChangePixelValueNormalization:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required": 
-                { "pixels": ("IMAGE", ),
-                  "mode": (["[0,1]=>[-1,1]", "[-1,1]=>[0,1]"],),            
-                 }
-                }
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "normalization"
-
-    CATEGORY = "image"
-
-    def normalization(self,pixels,mode):
-        if mode == "[0,1]=>[-1,1]":
-            pixels = (pixels * 255).round().clamp(min=0,max=255) / 127.5 - 1.0
-        elif mode == "[-1,1]=>[0,1]":
-            pixels = ((pixels+1) * 127.5).clamp(min=0,max=255) / 255.0
-        else:
-            pixels = pixels
-        return (pixels,)
-
 class LoadMagicClothingModel:
     @classmethod
     def INPUT_TYPES(s):
@@ -125,7 +52,7 @@ class LoadMagicClothingModel:
     RETURN_NAMES = ("sourceModel", "magicClothingModel")
     FUNCTION = "load_unet"
 
-    CATEGORY = "model_patches"
+    CATEGORY = "loaders"
 
     def load_unet(self, sourceModel, magicClothingUnet):
         torch.Tensor.__hash_log__ = pt_hash
@@ -172,25 +99,29 @@ class AddMagicClothingAttention:
                 {"sourceModel": ("MODEL",),
                  "magicClothingModel": ("MODEL",),
                  "clip": ("CLIP", ),
-                 "feature_image": ("LATENT", ),
                  "enable_feature_guidance": ("BOOLEAN", {"default": True}),
-                 "sigma": ("FLOAT", {"default": 0, "min": 0.0, "max": 100.0, "step": 0.0001}),
-                 "start_step":("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
-                 "end_step":("INT", {"default": 100, "min": 0, "max": 100, "step": 1}),
-                 "steps": ("INT", {"default": 20, "min": 1, "max": 100, "step": 1}),
-                 "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
-                 "feature_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
+                 "feature_image": ("LATENT", ),
+                 "feature_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 10.0, "step": 0.1, "round": 0.01}),
+                 "sigma": ("FLOAT", {"default": 0.71, "min": 0.0, "max": 3.0, "step": 0.01, "round": 0.01}),
+                #  "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
+                #  "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
+                #  "sigma": ("FLOAT", {"default": 0, "min": 0.0, "max": 100.0, "step": 0.05}),
+                #  "start_step":("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
+                #  "end_step":("INT", {"default": 100, "min": 0, "max": 100, "step": 1}),
+                #  "steps": ("INT", {"default": 20, "min": 1, "max": 100, "step": 1}),
                  }
                 }
-    RETURN_TYPES = ("MODEL",comfy.samplers.KSampler.SCHEDULERS)
-    RETURN_NAMES = ("MODEL","SCHEDULER")
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("MODEL",)
 
     FUNCTION = "add_features"
 
     CATEGORY = "model_patches"
 
-    def add_features(self, sourceModel,magicClothingModel, clip, feature_image, enable_feature_guidance=True, sigma=1.0,start_step=0,end_step = 100,steps = 20,scheduler="karras",feature_guidance_scale=2.5):
-        attn_stored = self.calculate_features_zj(magicClothingModel,clip, feature_image,sigma,start_step,end_step,steps,scheduler)
+    def add_features(self, sourceModel,magicClothingModel, clip,enable_feature_guidance ,feature_image,feature_guidance_scale,sigma,
+                    #  sampler_name,scheduler,start_step=0,end_step = 100,steps = 20,
+                     ):
+        attn_stored = self.calculate_features_zj(magicClothingModel,clip, feature_image,sigma=sigma)
         attn_stored["enable_feature_guidance"] = enable_feature_guidance
         attn_stored["feature_guidance_scale"] = feature_guidance_scale
         attn_stored_data = attn_stored["data"]
@@ -204,7 +135,7 @@ class AddMagicClothingAttention:
                     sourceModel.set_model_attn1_replace(ReplacePatch(), block_name, block_number, attention_index)
         self.inject_comfyui()
         sourceModel.model_options["transformer_options"]["attn_stored"] = attn_stored
-        return (sourceModel,scheduler)
+        return (sourceModel,)
 
     def inject_comfyui(self):
         old_get_area_and_mult = comfy.samplers.get_area_and_mult
@@ -220,7 +151,7 @@ class AddMagicClothingAttention:
             return result
         comfy.samplers.get_area_and_mult = get_area_and_mult
 
-    def calculate_features(self,magicClothingModel, source_clip,feature_image,sigma,start_step,end_step,steps,scheduler):
+    def calculate_features(self,magicClothingModel, source_clip,feature_image,sigma =None,start_step =None,end_step =None,steps =None,scheduler =None,sampler_name =None):
         magicClothingModel.set_model_attn1_patch(SaveAttnInputPatch())
         attn_stored = {}
         attn_stored["data"] = {}
@@ -241,7 +172,7 @@ class AddMagicClothingAttention:
         latent_image = latent_image.to(magicClothingModel.load_device).to(dtype)
         noise = noise.to(magicClothingModel.load_device).to(dtype)  
         sigmas = torch.tensor([1,0])
-        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, "uni_pc", scheduler,
+        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, "uni_pc", "karras",
                                       positive, negative, latent_image, denoise=1.0,
                                       disable_noise=False, start_step=None,
                                       last_step=None, force_full_denoise=False,sigmas=sigmas,
@@ -252,9 +183,21 @@ class AddMagicClothingAttention:
         latent_image = feature_image["samples"].to(model_management.unet_offload_device())
         return attn_stored
     
-    
+    def _calculate_sigmas(self,steps,model_sampling,scheduler,sampler_name):
+        sigmas = None
+
+        discard_penultimate_sigma = False
+        if sampler_name in comfy.samplers.KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS:
+            steps += 1
+            discard_penultimate_sigma = True
+
+        sigmas = comfy.samplers.calculate_sigmas(model_sampling,scheduler, steps)
+
+        if discard_penultimate_sigma:
+            sigmas = torch.cat([sigmas[:-2], sigmas[-1:]])
+        return sigmas
         
-    def calculate_features_zj(self,magicClothingModel, source_clip,feature_image,sigma,start_step,end_step,steps,scheduler):
+    def calculate_features_zj(self,magicClothingModel, source_clip,feature_image,sigma = 1.1,start_step =None,end_step =None,steps =None,scheduler =None,sampler_name =None):
         magicClothingModel.set_model_attn1_patch(SaveAttnInputPatch())
         attn_stored = {}
         attn_stored["data"] = {}
@@ -264,22 +207,21 @@ class AddMagicClothingAttention:
         if latent_image.shape[0] > 1:
             latent_image = torch.chunk(latent_image, latent_image.shape[0])[0]
         positive_tokens = source_clip.tokenize("")
-        positive_cond, positive_pooled = source_clip.encode_from_tokens(
-            positive_tokens, return_pooled=True)
+        positive_cond, positive_pooled = source_clip.encode_from_tokens(positive_tokens, return_pooled=True)
         dtype = magicClothingModel.model.get_dtype()
         
-        latent_image = magicClothingModel.model.process_latent_in(
-            latent_image).to(magicClothingModel.load_device)
+        latent_image = magicClothingModel.model.process_latent_in(latent_image).to(magicClothingModel.load_device)
         context = positive_cond.to(magicClothingModel.load_device).to(dtype)
-        sigmas = comfy.samplers.calculate_sigmas(
-            magicClothingModel.model.model_sampling, scheduler, steps).to(magicClothingModel.load_device)
-        start_step = max(0, min(start_step, steps))
-        end_step = max(0, min(end_step, steps))
-        calc_steps = sigmas[start_step:end_step]
-        calc_sigmas = [calc_steps[i] for i in range(calc_steps.shape[0])]
-        attn_stored["calc_sigmas"] = calc_sigmas
-        real_sigma = sigmas[0].expand((latent_image.shape[0]))
-        real_sigma = (real_sigma*0+sigma).to(dtype)
+        # sigmas = self._calculate_sigmas(steps,magicClothingModel.model.model_sampling,scheduler,sampler_name)
+        # sigmas = sigmas.to(magicClothingModel.load_device)
+        # start_step = max(0, min(start_step, steps))
+        # end_step = max(0, min(end_step, steps))
+        # calc_steps = sigmas[start_step:end_step]
+        # calc_sigmas = [calc_steps[i].item() for i in range(calc_steps.shape[0])]
+        # attn_stored["calc_sigmas"] = calc_sigmas
+        # real_sigma = sigmas[0].expand((latent_image.shape[0]))
+        # real_sigma = (real_sigma*0+sigma).to(dtype)
+        real_sigma = torch.tensor([sigma], dtype=dtype).to(magicClothingModel.load_device)
         timestep = real_sigma * 0
         xc = magicClothingModel.model.model_sampling.calculate_input(real_sigma, latent_image).to(dtype)
         model_management.load_model_gpu(magicClothingModel)                      
@@ -291,111 +233,12 @@ class AddMagicClothingAttention:
         del positive_tokens
         return attn_stored
 
-class RunOmsNode:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required": {"cloth_image": ("IMAGE",),
-                             "model": ("MODEL",),
-                            #  "clip": ("CLIP", ),
-                            #  "positive": ("CONDITIONING", ),
-                            #  "negative": ("CONDITIONING", ),
-                             "seed": ("INT", {"default": 1234, "min": 0, "max": 0xffffffffffffffff}),
-                             "scale": ("FLOAT", {"default": 5, "min": 0.0, "max": 10.0,"step": 0.01}),
-                             "cloth_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 10.0,"step": 0.01}),
-                             "steps": ("INT", {"default": 25, "min": 0, "max": 100}),
-                             "height": ("INT", {"default": 768, "min": 0, "max": 2048}),
-                             "width": ("INT", {"default": 576, "min": 0, "max": 2048}),
-                             }
-                }
-
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "run_oms"
-
-    CATEGORY = "loaders"
-    
-    def run_oms(self,cloth_image, model,seed,scale,cloth_guidance_scale,steps,height,width):
-        # seed = 1234
-        # width = 96
-        # height = 96
-        # steps = 1
-        # cloth_image =  (cloth_image * 255).round().clamp(min=0,max=255).to(dtype=torch.float32)  / 255.0
-        cloth_image =  (cloth_image * 255).round().clamp(min=0,max=255).to(dtype=torch.float32)  / 127.5 - 1.0
-        cloth_image =  cloth_image.permute(0,3,1,2)
-        if not isinstance(model,ClothAdapter):
-            gen_image = cloth_image.permute(0, 2, 3, 1)
-            gen_image = ((gen_image+1) * 127.5).clamp(min=0,max=255).to(dtype=torch.float32) / 255.0
-            return (gen_image,)
-        cloth_image =  cloth_image.to(model.device, dtype=model.pipe.dtype)
-        cloth_image.__hash_log__("特征提取-衣服")
-        with torch.inference_mode():
-            prompt_embeds_null = model.pipe.encode_prompt([""], device=model.pipe.device, num_images_per_prompt=1, do_classifier_free_guidance=False)[0]
-            prompt_embeds_null.__hash_log__("特征提取-空提示")
-            prompt_embeds, negative_prompt_embeds = model.pipe.encode_prompt(
-                "a photography of a model,best quality, high quality",
-                model.pipe.device,
-                1,
-                True,
-                "bare, monochrome, lowres, bad anatomy, worst quality, low quality",
-                prompt_embeds=None,
-                negative_prompt_embeds=None,
-                lora_scale=None,
-                clip_skip=None,
-            )
-            cloth_latent = {}
-            cloth_latent["samples"] = model.pipe.vae.encode(cloth_image).latent_dist.mode()
-        gen_image = model.generate(cloth_latent["samples"],None, prompt_embeds_null,prompt_embeds, negative_prompt_embeds, 1, seed, scale, cloth_guidance_scale, steps, height, width)
-        with torch.inference_mode():
-            gen_image = model.pipe.vae.decode(gen_image, return_dict=False, generator=model.generator)[0]
-        gen_image.__hash_log__("生成-图像(完)")
-        gen_image = gen_image.permute(0, 2, 3, 1)
-        # gen_image = (gen_image * 255.0).clamp(min=0,max=255).to(dtype=torch.float32) / 255.0
-
-        gen_image = ((gen_image+1) * 127.5).clamp(min=0,max=255).to(dtype=torch.float32) / 255.0
-        return (gen_image,)
-
-class LoadOmsNode:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required":
-                {"magicClothingUnet": (folder_paths.get_filename_list("unet"), ),
-                 }
-                }
-
-    RETURN_TYPES = ("MODEL",)
-    RETURN_NAMES = ("MODEL",)
-    FUNCTION = "run_oms"
-
-    CATEGORY = "loaders"
-    
-    def run_oms(self, magicClothingUnet):
-        torch.Tensor.__hash_log__ = pt_hash
-        if "768" not in magicClothingUnet:
-            return ({},)
-        unet_path = folder_paths.get_full_path("unet", magicClothingUnet)
-        # unet_path = "C:\\Users\\Administrator\\.cache\\models\\oms_diffusion_768_200000.safetensors"
-        pipe_path = "SG161222/Realistic_Vision_V4.0_noVAE"
-        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(dtype=torch.float32)
-        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,vae=vae,torch_dtype=torch.float32)
-        pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-        full_net = ClothAdapter(pipe, unet_path, "cpu",True)
-        return (full_net,)
-
 NODE_CLASS_MAPPINGS = {
-    "InjectTensorHashLog":InjectTensorHashLog,
-    "VAE Mode Choose": VAEModeChoose,
-    "Change Pixel Value Normalization":ChangePixelValueNormalization,
     "Load Magic Clothing Model": LoadMagicClothingModel,
     "Add Magic Clothing Attention": AddMagicClothingAttention,
-    "RUN OMS": RunOmsNode,
-    "LOAD OMS": LoadOmsNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "InjectTensorHashLog":"InjectTensorHashLog",
-    "VAE Mode Choose":"VAE Mode Choose",
-    "Change Pixel Value Normalization":"Change Pixel Value Normalization",
     "Load Magic Clothing Model": "Load Magic Clothing Model",
     "Add Magic Clothing Attention": "Add Magic Clothing Attention",
-    "RUN OMS": "RUN OMS",
-    "LOAD OMS": "LOAD OMS",
 }

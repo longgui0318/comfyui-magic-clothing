@@ -187,15 +187,14 @@ class SaveAttnInputPatch:
         if block_id not in attn_stored_data[block_name]:
             attn_stored_data[block_name][block_id] = {}
         attn_stored_data[block_name][block_id][block_index] = q
-        q.__hash_log__(block_name+"-"+str(block_id)+"-"+str(block_index))
         return (q, k, v)
 
 
 def _check_(calc_sigmas,sigma):
     if calc_sigmas is None:
-        return False
+        return True
     for i in range(len(calc_sigmas)):
-        if torch.equal(calc_sigmas[i],sigma):
+        if abs(calc_sigmas[i] - sigma.item()) < 0.000001:
             return True
     return False
 
@@ -203,8 +202,6 @@ class InputPatch:
     
     def _calculate_input_(hideen_states, sigma):
         return hideen_states / (sigma ** 2 + 1) ** 0.5
-
-
 
     def __call__(self, q, k, v, extra_options):
         if "attn_stored" in extra_options:
@@ -217,7 +214,7 @@ class InputPatch:
         block_id = extra_options["block"][1]
         block_index = extra_options["block_index"]
         sigma = extra_options["sigmas"]
-        calc_sigmas = attn_stored["calc_sigmas"]
+        calc_sigmas = attn_stored.get("calc_sigmas",None)
         if _check_(calc_sigmas,sigma) and block_name in attn_stored_data and block_id in attn_stored_data[block_name] and block_index in attn_stored_data[block_name][block_id]:
             FLAG_OUT_CHANNEL = 2
             qEQk = q.shape[FLAG_OUT_CHANNEL] == k.shape[FLAG_OUT_CHANNEL]
@@ -255,7 +252,7 @@ class ReplacePatch:
         if attn_stored is None:
             return q
         sigma = extra_options["sigmas"]
-        calc_sigmas = attn_stored["calc_sigmas"]
+        calc_sigmas = attn_stored.get("calc_sigmas",None)
         if _check_(calc_sigmas,sigma):
             q, _ = torch.chunk(q, 2, dim=1)  # 抹除额外内容
         return q
