@@ -191,10 +191,20 @@ class SaveAttnInputPatch:
         return (q, k, v)
 
 
+def _check_(calc_sigmas,sigma):
+    if calc_sigmas is None:
+        return False
+    for i in range(len(calc_sigmas)):
+        if torch.equal(calc_sigmas[i],sigma):
+            return True
+    return False
+
 class InputPatch:
     
     def _calculate_input_(hideen_states, sigma):
         return hideen_states / (sigma ** 2 + 1) ** 0.5
+
+
 
     def __call__(self, q, k, v, extra_options):
         if "attn_stored" in extra_options:
@@ -206,13 +216,14 @@ class InputPatch:
         block_name = extra_options["block"][0]
         block_id = extra_options["block"][1]
         block_index = extra_options["block_index"]
-        sigmas = extra_options["sigmas"]
-        if block_name in attn_stored_data and block_id in attn_stored_data[block_name] and block_index in attn_stored_data[block_name][block_id]:
+        sigma = extra_options["sigmas"]
+        calc_sigmas = attn_stored["calc_sigmas"]
+        if _check_(calc_sigmas,sigma) and block_name in attn_stored_data and block_id in attn_stored_data[block_name] and block_index in attn_stored_data[block_name][block_id]:
             FLAG_OUT_CHANNEL = 2
             qEQk = q.shape[FLAG_OUT_CHANNEL] == k.shape[FLAG_OUT_CHANNEL]
             qEQv = q.shape[FLAG_OUT_CHANNEL] == v.shape[FLAG_OUT_CHANNEL]
             feature_hidden_states = attn_stored_data[block_name][block_id][block_index]
-            # feature_hidden_states = self._calculate_input_(feature_hidden_states, sigmas)
+            # feature_hidden_states = self._calculate_input_(feature_hidden_states, sigma)
             if q.shape[1] != feature_hidden_states.shape[1]:
                 clean_attn_stored_memory(attn_stored)
                 raise ValueError(
@@ -243,6 +254,8 @@ class ReplacePatch:
             attn_stored = extra_options["attn_stored"]
         if attn_stored is None:
             return q
-        q, _ = torch.chunk(q, 2, dim=1)  # 抹除额外内容
-        # 对于整体的如何呢
+        sigma = extra_options["sigmas"]
+        calc_sigmas = attn_stored["calc_sigmas"]
+        if _check_(calc_sigmas,sigma):
+            q, _ = torch.chunk(q, 2, dim=1)  # 抹除额外内容
         return q

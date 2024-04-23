@@ -174,23 +174,26 @@ class AddMagicClothingAttention:
                  "clip": ("CLIP", ),
                  "feature_image": ("LATENT", ),
                  "enable_feature_guidance": ("BOOLEAN", {"default": True}),
-                 "noise": ("FLOAT", {"default": 0, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
-                 "sigma": ("FLOAT", {"default": 1, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
+                 "sigma": ("FLOAT", {"default": 0, "min": 0.0, "max": 100.0, "step": 0.0001}),
+                 "start_step":("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
+                 "end_step":("INT", {"default": 100, "min": 0, "max": 100, "step": 1}),
+                 "steps": ("INT", {"default": 20, "min": 1, "max": 100, "step": 1}),
+                 "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
                  "feature_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
                  }
                 }
-    RETURN_TYPES = ("MODEL",)
-    RETURN_NAMES = ("MODEL",)
+    RETURN_TYPES = ("MODEL",comfy.samplers.KSampler.SCHEDULERS)
+    RETURN_NAMES = ("MODEL","SCHEDULER")
+
     FUNCTION = "add_features"
 
     CATEGORY = "model_patches"
 
-    def add_features(self, sourceModel,magicClothingModel, clip, feature_image, enable_feature_guidance=True, noise = 0,sigma=1,feature_guidance_scale=2.5):
-        attn_stored_data = self.calculate_features_zj(magicClothingModel,clip, feature_image,noise,sigma)
-        attn_stored = {}
+    def add_features(self, sourceModel,magicClothingModel, clip, feature_image, enable_feature_guidance=True, sigma=1.0,start_step=0,end_step = 100,steps = 20,scheduler="karras",feature_guidance_scale=2.5):
+        attn_stored = self.calculate_features_zj(magicClothingModel,clip, feature_image,sigma,start_step,end_step,steps,scheduler)
         attn_stored["enable_feature_guidance"] = enable_feature_guidance
         attn_stored["feature_guidance_scale"] = feature_guidance_scale
-        attn_stored["data"] = attn_stored_data
+        attn_stored_data = attn_stored["data"]
         sourceModel = sourceModel.clone()
         sourceModel.set_model_unet_function_wrapper(UnetFunctionWrapper())
         sourceModel.set_model_sampler_cfg_function(SamplerCfgFunctionWrapper())
@@ -201,7 +204,7 @@ class AddMagicClothingAttention:
                     sourceModel.set_model_attn1_replace(ReplacePatch(), block_name, block_number, attention_index)
         self.inject_comfyui()
         sourceModel.model_options["transformer_options"]["attn_stored"] = attn_stored
-        return (sourceModel,)
+        return (sourceModel,scheduler)
 
     def inject_comfyui(self):
         old_get_area_and_mult = comfy.samplers.get_area_and_mult
@@ -217,7 +220,7 @@ class AddMagicClothingAttention:
             return result
         comfy.samplers.get_area_and_mult = get_area_and_mult
 
-    def calculate_features(self,magicClothingModel, source_clip,feature_image,noise_scaling,sigma_scaling):
+    def calculate_features(self,magicClothingModel, source_clip,feature_image,sigma,start_step,end_step,steps,scheduler):
         magicClothingModel.set_model_attn1_patch(SaveAttnInputPatch())
         attn_stored = {}
         attn_stored["data"] = {}
@@ -227,7 +230,7 @@ class AddMagicClothingAttention:
         if latent_image.shape[0] > 1:
             latent_image = torch.chunk(latent_image, latent_image.shape[0])[0]
         noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
-        noise = noise+noise_scaling
+        noise = noise+0
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
         positive_tokens = source_clip.tokenize("")
         positive_cond, positive_pooled = source_clip.encode_from_tokens(
@@ -237,8 +240,8 @@ class AddMagicClothingAttention:
         dtype = magicClothingModel.model.get_dtype()
         latent_image = latent_image.to(magicClothingModel.load_device).to(dtype)
         noise = noise.to(magicClothingModel.load_device).to(dtype)  
-        sigmas = torch.tensor([sigma_scaling,0])
-        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, "uni_pc", "karras",
+        sigmas = torch.tensor([1,0])
+        samples = comfy.sample.sample(magicClothingModel, noise, 1, 1, "uni_pc", scheduler,
                                       positive, negative, latent_image, denoise=1.0,
                                       disable_noise=False, start_step=None,
                                       last_step=None, force_full_denoise=False,sigmas=sigmas,
@@ -247,11 +250,11 @@ class AddMagicClothingAttention:
         del positive_pooled
         del positive_tokens
         latent_image = feature_image["samples"].to(model_management.unet_offload_device())
-        return attn_stored["data"]
+        return attn_stored
     
     
         
-    def calculate_features_zj(self,magicClothingModel, source_clip,feature_image,noise_scaling,sigma_scaling):
+    def calculate_features_zj(self,magicClothingModel, source_clip,feature_image,sigma,start_step,end_step,steps,scheduler):
         magicClothingModel.set_model_attn1_patch(SaveAttnInputPatch())
         attn_stored = {}
         attn_stored["data"] = {}
@@ -265,12 +268,20 @@ class AddMagicClothingAttention:
             positive_tokens, return_pooled=True)
         dtype = magicClothingModel.model.get_dtype()
         
-        latent_image = magicClothingModel.model.process_latent_in(latent_image).to(magicClothingModel.load_device)
-        context = positive_cond.to(magicClothingModel.load_device).to(dtype)   
-        sigmas = comfy.samplers.calculate_sigmas(magicClothingModel.model.model_sampling,"karras",1).to(magicClothingModel.load_device)
-        sigma =  sigmas[0].expand((latent_image.shape[0]))
-        timestep = sigma * 0
-        xc = magicClothingModel.model.model_sampling.calculate_input(sigma, latent_image).to(dtype)
+        latent_image = magicClothingModel.model.process_latent_in(
+            latent_image).to(magicClothingModel.load_device)
+        context = positive_cond.to(magicClothingModel.load_device).to(dtype)
+        sigmas = comfy.samplers.calculate_sigmas(
+            magicClothingModel.model.model_sampling, scheduler, steps).to(magicClothingModel.load_device)
+        start_step = max(0, min(start_step, steps))
+        end_step = max(0, min(end_step, steps))
+        calc_steps = sigmas[start_step:end_step]
+        calc_sigmas = [calc_steps[i] for i in range(calc_steps.shape[0])]
+        attn_stored["calc_sigmas"] = calc_sigmas
+        real_sigma = sigmas[0].expand((latent_image.shape[0]))
+        real_sigma = (real_sigma*0+sigma).to(dtype)
+        timestep = real_sigma * 0
+        xc = magicClothingModel.model.model_sampling.calculate_input(real_sigma, latent_image).to(dtype)
         model_management.load_model_gpu(magicClothingModel)                      
         magicClothingModel.model.diffusion_model(xc, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
         latent_image = feature_image["samples"].to(model_management.unet_offload_device())
@@ -278,7 +289,7 @@ class AddMagicClothingAttention:
         del positive_cond
         del positive_pooled
         del positive_tokens
-        return attn_stored["data"]
+        return attn_stored
 
 class RunOmsNode:
     @classmethod
@@ -358,15 +369,15 @@ class LoadOmsNode:
     
     def run_oms(self, magicClothingUnet):
         torch.Tensor.__hash_log__ = pt_hash
-        if "768" in magicClothingUnet:
+        if "768" not in magicClothingUnet:
             return ({},)
         unet_path = folder_paths.get_full_path("unet", magicClothingUnet)
-        unet_path = "C:\\Users\\Administrator\\.cache\\models\\oms_diffusion_768_200000.safetensors"
+        # unet_path = "C:\\Users\\Administrator\\.cache\\models\\oms_diffusion_768_200000.safetensors"
         pipe_path = "SG161222/Realistic_Vision_V4.0_noVAE"
-        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(dtype=torch.float16)
-        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,vae=vae,torch_dtype=torch.float16)
+        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(dtype=torch.float32)
+        pipe = OmsDiffusionPipeline.from_pretrained(pipe_path,vae=vae,torch_dtype=torch.float32)
         pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-        full_net = ClothAdapter(pipe, unet_path, "cuda",True)
+        full_net = ClothAdapter(pipe, unet_path, "cpu",True)
         return (full_net,)
 
 NODE_CLASS_MAPPINGS = {
