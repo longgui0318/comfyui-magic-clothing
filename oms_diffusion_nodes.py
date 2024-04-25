@@ -102,7 +102,7 @@ class AddMagicClothingAttention:
                  "enable_feature_guidance": ("BOOLEAN", {"default": True}),
                  "feature_image": ("LATENT", ),
                  "feature_guidance_scale": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 10.0, "step": 0.1, "round": 0.01}),
-                 "sigma": ("FLOAT", {"default": 0.71, "min": 0.0, "max": 3.0, "step": 0.01, "round": 0.01}),
+                #  "sigma": ("FLOAT", {"default": 0.71, "min": 0.0, "max": 3.0, "step": 0.01, "round": 0.01}),
                 #  "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
                 #  "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
                 #  "sigma": ("FLOAT", {"default": 0, "min": 0.0, "max": 100.0, "step": 0.05}),
@@ -118,10 +118,10 @@ class AddMagicClothingAttention:
 
     CATEGORY = "model_patches"
 
-    def add_features(self, sourceModel,magicClothingModel, clip,enable_feature_guidance ,feature_image,feature_guidance_scale,sigma,
-                    #  sampler_name,scheduler,start_step=0,end_step = 100,steps = 20,
+    def add_features(self, sourceModel,magicClothingModel, clip,enable_feature_guidance ,feature_image,feature_guidance_scale,
+                    #  sigma,sampler_name,scheduler,start_step=0,end_step = 100,steps = 20,
                      ):
-        attn_stored = self.calculate_features_zj(magicClothingModel,clip, feature_image,sigma=sigma)
+        attn_stored = self.calculate_features_zj(magicClothingModel,clip, feature_image)
         attn_stored["enable_feature_guidance"] = enable_feature_guidance
         attn_stored["feature_guidance_scale"] = feature_guidance_scale
         attn_stored_data = attn_stored["data"]
@@ -197,7 +197,7 @@ class AddMagicClothingAttention:
             sigmas = torch.cat([sigmas[:-2], sigmas[-1:]])
         return sigmas
         
-    def calculate_features_zj(self,magicClothingModel, source_clip,feature_image,sigma = 1.1,start_step =None,end_step =None,steps =None,scheduler =None,sampler_name =None):
+    def calculate_features_zj(self,magicClothingModel, source_clip,feature_image,sigma = 0,start_step =None,end_step =None,steps =None,scheduler =None,sampler_name =None):
         magicClothingModel.set_model_attn1_patch(SaveAttnInputPatch())
         attn_stored = {}
         attn_stored["data"] = {}
@@ -225,7 +225,7 @@ class AddMagicClothingAttention:
         timestep = real_sigma * 0
         xc = magicClothingModel.model.model_sampling.calculate_input(real_sigma, latent_image).to(dtype)
         model_management.load_model_gpu(magicClothingModel)                      
-        magicClothingModel.model.diffusion_model(xc, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
+        magicClothingModel.model.diffusion_model(latent_image, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
         latent_image = feature_image["samples"].to(model_management.unet_offload_device())
         comfy.sampler_helpers.cleanup_models({}, [magicClothingModel])
         del positive_cond
