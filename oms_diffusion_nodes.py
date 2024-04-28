@@ -223,14 +223,11 @@ class AddMagicClothingAttention:
         # real_sigma = (real_sigma*0+sigma).to(dtype)
         real_sigma = torch.tensor([sigma], dtype=dtype).to(magicClothingModel.load_device)
         timestep = real_sigma * 0
-        xc = magicClothingModel.model.model_sampling.calculate_input(real_sigma, latent_image).to(dtype)
+        latent_image=latent_image.to(magicClothingModel.load_device).to(dtype)
+        # xc = magicClothingModel.model.model_sampling.calculate_input(real_sigma, latent_image).to(dtype)
         model_management.load_model_gpu(magicClothingModel)                      
         magicClothingModel.model.diffusion_model(latent_image, timestep, context=context, control=None, transformer_options=magicClothingModel.model_options["transformer_options"])
-        latent_image = feature_image["samples"].to(model_management.unet_offload_device())
         comfy.sampler_helpers.cleanup_models({}, [magicClothingModel])
-        del positive_cond
-        del positive_pooled
-        del positive_tokens
         return attn_stored
 
 NODE_CLASS_MAPPINGS = {
