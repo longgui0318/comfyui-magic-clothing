@@ -158,11 +158,65 @@ class RunMagicClothingDiffusersModel:
         return (gen_image,)
 
 
-class LoadMagicClothingPipeline:
+class LoadMagicClothingPipelineWithPath:
+    @classmethod
+    def INPUT_TYPES(cls):
+        paths = []
+        my_path = os.path.dirname(__file__)
+        my_pipeline_path = os.path.join(my_path, "conversion")
+        for search_path in folder_paths.get_folder_paths("diffusers"):
+            if os.path.exists(search_path):
+                client_paths = next(os.walk(search_path))[1]
+                client_paths = ["diffusers/" + item for item in client_paths]
+                paths += client_paths
+        if os.path.exists(my_pipeline_path):
+            client_paths = next(os.walk(my_pipeline_path))[1]
+            client_paths = ["conversion/" + item for item in client_paths]
+            paths += client_paths
+        return {"required": {"model_path": (paths,),
+                             "dtype": (["default", "float32", "float16", "bfloat16"],),
+                             "device": (["default", "cpu", "cuda", "cuda:0", "cuda:1"],), }}
+    RETURN_TYPES = ("PIPELINE", "AUTOENCODER", "SCHEDULER",)
+    FUNCTION = "load_checkpoint"
+
+    CATEGORY = "Diffusers"
+
+    def load_checkpoint(self, model_path,dtype,device):
+        if dtype == "float16":
+            seleted_type = torch.float16
+        elif dtype == "bfloat16":
+            seleted_type = torch.bfloat16
+        else:
+            seleted_type = torch.float32
+        if device == "default":
+            seleted_device = model_management.get_torch_device()
+        else:
+            seleted_device = torch.device(device)
+        
+        if model_path.startswith("conversion/"):
+            model_path = model_path.replace("conversion/", "")
+            my_path = os.path.dirname(__file__)
+            my_pipeline_path = os.path.join(my_path, "conversion")
+            model_real_path  = os.path.join(my_pipeline_path, model_path)
+            model_real_dir = my_pipeline_path
+        elif model_path.startswith("diffusers/"):
+            model_path = model_path.replace("diffusers/", "")
+            diffusers_path = folder_paths.get_folder_paths("diffusers")[0]
+            model_real_path  = os.path.join(diffusers_path, model_path)
+            model_real_dir = diffusers_path
+        else:
+            raise ValueError("未选择模型")
+  
+        pipe = MagicClothingDiffusionPipeline.from_pretrained(
+            pretrained_model_name_or_path=model_real_path,
+            torch_dtype=seleted_type,
+            cache_dir=model_real_dir,
+        )
+        pipe.to(seleted_device, dtype=seleted_type)
+        return ((pipe, model_real_path), pipe.vae, pipe.scheduler)
+
+class LoadMagicClothingPipelinWithConversion:
     # code base from https://github.com/Limitex/ComfyUI-Diffusers.git
-    def __init__(self):
-        self.tmp_dir = folder_paths.get_temp_directory()
-        self.dtype = torch.float32
 
     @classmethod
     def INPUT_TYPES(s):
@@ -297,7 +351,8 @@ NODE_CLASS_MAPPINGS = {
     "Diffusers Scheduler Loader &MC": DiffusersSchedulerLoader,
     "Change Pixel Value Normalization": ChangePixelValueNormalization,
     "Change Pipeline Dtype And Device": ChangePipelineDtypeAndDevice,
-    "Load Magic Clothing Pipeline": LoadMagicClothingPipeline,
+    "Load Magic Clothing Pipeline With Path": LoadMagicClothingPipelineWithPath,
+    "Load Magic Clothing Pipeline": LoadMagicClothingPipelinWithConversion,
     "Load Magic Clothing Adapter": LoadMagicClothingAdapter,
     "RUN Magic Clothing Diffusers Model": RunMagicClothingDiffusersModel,
 }
@@ -307,6 +362,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Diffusers Scheduler Loader &MC": "Diffusers Scheduler Loader &MC",
     "Change Pipeline Dtype And Device": "Change Pipeline Dtype And Device",
     "Change Pixel Value Normalization": "Change Pixel Value Normalization",
+    "Load Magic Clothing Pipeline With Path":"Load Magic Clothing Pipeline With Path&Diffusers",
     "Load Magic Clothing Pipeline":"Load Magic Clothing Pipeline&Diffusers",
     "Load Magic Clothing Adapter": "Load Magic Clothing Adapter &Diffusers",
     "RUN Magic Clothing Adapter": "RUN Magic Clothing Adapter &Diffusers",
