@@ -1,7 +1,7 @@
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import *
 
 
-class OmsDiffusionPipeline(StableDiffusionPipeline):
+class MagicClothingDiffusionPipeline(StableDiffusionPipeline):
     @torch.inference_mode
     def __call__(
             self,

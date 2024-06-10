@@ -7,6 +7,7 @@ from diffusers.utils import USE_PEFT_BACKEND
 import torch.nn as nn
 from diffusers.models.attention_processor import Attention
 
+Linear_Call_Needs_Extra_Args = False
 
 class AttnProcessor(nn.Module):
     r"""
@@ -49,15 +50,23 @@ class AttnProcessor(nn.Module):
         if attn.group_norm is not None:
             hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
-        query = attn.to_q(hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            query = attn.to_q(hidden_states, *args)
+        else:
+            query = attn.to_q(hidden_states)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
         elif attn.norm_cross:
             encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = attn.to_k(encoder_hidden_states)
-        value = attn.to_v(encoder_hidden_states)
+
+        if Linear_Call_Needs_Extra_Args:
+            key = attn.to_k(encoder_hidden_states, *args)
+            value = attn.to_v(encoder_hidden_states, *args)
+        else:
+            key = attn.to_k(encoder_hidden_states)
+            value = attn.to_v(encoder_hidden_states)
 
         query = attn.head_to_batch_dim(query)
         key = attn.head_to_batch_dim(key)
@@ -68,7 +77,10 @@ class AttnProcessor(nn.Module):
         hidden_states = attn.batch_to_head_dim(hidden_states)
 
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            hidden_states = attn.to_out[0](hidden_states, *args)
+        else:
+            hidden_states = attn.to_out[0](hidden_states)
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 
@@ -135,15 +147,22 @@ class REFAttnProcessor(nn.Module):
         if attn.group_norm is not None:
             hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
-        query = attn.to_q(hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            query = attn.to_q(hidden_states, *args)
+        else:
+            query = attn.to_q(hidden_states)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
         elif attn.norm_cross:
             encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = attn.to_k(encoder_hidden_states)
-        value = attn.to_v(encoder_hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            key = attn.to_k(encoder_hidden_states, *args)
+            value = attn.to_v(encoder_hidden_states, *args)
+        else:
+            key = attn.to_k(encoder_hidden_states)
+            value = attn.to_v(encoder_hidden_states)
 
         query = attn.head_to_batch_dim(query)
         key = attn.head_to_batch_dim(key)
@@ -157,7 +176,10 @@ class REFAttnProcessor(nn.Module):
             hidden_states, _ = torch.chunk(hidden_states, 2, dim=1)
 
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            hidden_states = attn.to_out[0](hidden_states, *args)
+        else:
+            hidden_states = attn.to_out[0](hidden_states)
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 
@@ -217,15 +239,22 @@ class AttnProcessor2_0(nn.Module):
             hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
         args = () if USE_PEFT_BACKEND else (scale,)
-        query = attn.to_q(hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            query = attn.to_q(hidden_states, *args)
+        else:
+            query = attn.to_q(hidden_states)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
         elif attn.norm_cross:
             encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = attn.to_k(encoder_hidden_states)
-        value = attn.to_v(encoder_hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            key = attn.to_k(encoder_hidden_states, *args)
+            value = attn.to_v(encoder_hidden_states, *args)
+        else:
+            key = attn.to_k(encoder_hidden_states)
+            value = attn.to_v(encoder_hidden_states)
 
         inner_dim = key.shape[-1]
         head_dim = inner_dim // attn.heads
@@ -245,7 +274,10 @@ class AttnProcessor2_0(nn.Module):
         hidden_states = hidden_states.to(query.dtype)
 
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            hidden_states = attn.to_out[0](hidden_states, *args)
+        else:
+            hidden_states = attn.to_out[0](hidden_states)
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 
@@ -317,15 +349,22 @@ class REFAttnProcessor2_0(nn.Module):
             hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
         args = () if USE_PEFT_BACKEND else (scale,)
-        query = attn.to_q(hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            query = attn.to_q(hidden_states, *args)
+        else:
+            query = attn.to_q(hidden_states)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
         elif attn.norm_cross:
             encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = attn.to_k(encoder_hidden_states)
-        value = attn.to_v(encoder_hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            key = attn.to_k(encoder_hidden_states, *args)
+            value = attn.to_v(encoder_hidden_states, *args)
+        else:
+            key = attn.to_k(encoder_hidden_states)
+            value = attn.to_v(encoder_hidden_states)
 
         inner_dim = key.shape[-1]
         head_dim = inner_dim // attn.heads
@@ -346,7 +385,10 @@ class REFAttnProcessor2_0(nn.Module):
         if self.type == "write":
             hidden_states, _ = torch.chunk(hidden_states, 2, dim=1)
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            hidden_states = attn.to_out[0](hidden_states, *args)
+        else:
+            hidden_states = attn.to_out[0](hidden_states)
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 
@@ -361,12 +403,14 @@ class REFAttnProcessor2_0(nn.Module):
 
 
 class REFAnimateDiffAttnProcessor2_0(nn.Module):
-    def __init__(self, name, type="read"):
+    def __init__(self, cross_attention_dim, hidden_size, name):
         super().__init__()
         if not hasattr(F, "scaled_dot_product_attention"):
             raise ImportError("AttnProcessor2_0 requires PyTorch 2.0, to use it, please upgrade PyTorch to 2.0.")
         self.name = name
-        self.type = type
+        self.scale = 1.0
+        self.to_k_ip = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
+        self.to_v_ip = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
 
     def __call__(
             self,
@@ -379,19 +423,17 @@ class REFAnimateDiffAttnProcessor2_0(nn.Module):
             attn_store=None,
             do_classifier_free_guidance=False,
     ) -> torch.FloatTensor:
-        if self.type == "read":
-            attn_store[self.name] = hidden_states
-        elif self.type == "write":
-            ref_hidden_states = attn_store[self.name]
-            if do_classifier_free_guidance:
-                empty_copy = torch.zeros_like(ref_hidden_states)
-                ref_hidden_states = torch.cat([empty_copy, ref_hidden_states, ref_hidden_states])
-            if hidden_states.shape[0] % ref_hidden_states.shape[0] != 0:
-                raise ValueError("not evenly divisible")
-            # ref_hidden_states = ref_hidden_states*1.05
-            hidden_states = torch.cat([hidden_states, ref_hidden_states.repeat(hidden_states.shape[0] // ref_hidden_states.shape[0], 1, 1)], dim=1)
-        else:
-            raise ValueError("unsupport type")
+        ref_hidden_states = attn_store[self.name]
+        if do_classifier_free_guidance:
+            empty_copy = torch.zeros_like(ref_hidden_states)
+            repeat_num = hidden_states.shape[0] // 3
+            ref_hidden_states = torch.cat(
+                [empty_copy.repeat(repeat_num, 1, 1), ref_hidden_states.repeat(repeat_num, 1, 1),
+                    ref_hidden_states.repeat(repeat_num, 1, 1)])
+        
+        if hidden_states.shape[0] % ref_hidden_states.shape[0] != 0:
+            raise ValueError("not evenly divisible")
+        
         residual = hidden_states
         if attn.spatial_norm is not None:
             hidden_states = attn.spatial_norm(hidden_states, temb)
@@ -416,15 +458,22 @@ class REFAnimateDiffAttnProcessor2_0(nn.Module):
             hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
         args = () if USE_PEFT_BACKEND else (scale,)
-        query = attn.to_q(hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            query = attn.to_q(hidden_states, *args)
+        else:
+            query = attn.to_q(hidden_states)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
         elif attn.norm_cross:
             encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = attn.to_k(encoder_hidden_states)
-        value = attn.to_v(encoder_hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            key = attn.to_k(encoder_hidden_states, *args)
+            value = attn.to_v(encoder_hidden_states, *args)
+        else:
+            key = attn.to_k(encoder_hidden_states)
+            value = attn.to_v(encoder_hidden_states)
 
         inner_dim = key.shape[-1]
         head_dim = inner_dim // attn.heads
@@ -443,10 +492,21 @@ class REFAnimateDiffAttnProcessor2_0(nn.Module):
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
         hidden_states = hidden_states.to(query.dtype)
 
-        if self.type == "write":
-            hidden_states, _ = torch.chunk(hidden_states, 2, dim=1)
+        ref_key = self.to_k_ip(ref_hidden_states.float()).view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+        ref_value = self.to_v_ip(ref_hidden_states.float()).view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+        ref_hidden_states = F.scaled_dot_product_attention(
+            query.float(), ref_key, ref_value, attn_mask=None, dropout_p=0.0, is_causal=False
+        )
+
+        ref_hidden_states = ref_hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
+        ref_hidden_states = ref_hidden_states.to(query.dtype)
+        
+        hidden_states = hidden_states + self.scale * ref_hidden_states
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            hidden_states = attn.to_out[0](hidden_states, *args)
+        else:
+            hidden_states = attn.to_out[0](hidden_states)
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 
@@ -480,6 +540,7 @@ class IPAttnProcessor(nn.Module):
             encoder_hidden_states=None,
             attention_mask=None,
             temb=None,
+            scale: float = 1.0,
             attn_store=None,
             do_classifier_free_guidance=None,
             enable_cloth_guidance=None
@@ -503,7 +564,11 @@ class IPAttnProcessor(nn.Module):
         if attn.group_norm is not None:
             hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
-        query = attn.to_q(hidden_states)
+        args = () if USE_PEFT_BACKEND else (scale,)
+        if Linear_Call_Needs_Extra_Args:
+            query = attn.to_q(hidden_states, *args)
+        else:
+            query = attn.to_q(hidden_states)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
@@ -517,8 +582,12 @@ class IPAttnProcessor(nn.Module):
             if attn.norm_cross:
                 encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = attn.to_k(encoder_hidden_states)
-        value = attn.to_v(encoder_hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            key = attn.to_k(encoder_hidden_states, *args)
+            value = attn.to_v(encoder_hidden_states, *args)
+        else:
+            key = attn.to_k(encoder_hidden_states)
+            value = attn.to_v(encoder_hidden_states)
 
         query = attn.head_to_batch_dim(query)
         key = attn.head_to_batch_dim(key)
@@ -543,7 +612,10 @@ class IPAttnProcessor(nn.Module):
         hidden_states = hidden_states + self.scale * ip_hidden_states
 
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            hidden_states = attn.to_out[0](hidden_states, *args)
+        else:
+            hidden_states = attn.to_out[0](hidden_states)
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 
@@ -581,6 +653,7 @@ class IPAttnProcessor2_0(torch.nn.Module):
             encoder_hidden_states=None,
             attention_mask=None,
             temb=None,
+            scale: float = 1.0,
             attn_store=None,
             do_classifier_free_guidance=None,
             enable_cloth_guidance=None
@@ -609,7 +682,11 @@ class IPAttnProcessor2_0(torch.nn.Module):
         if attn.group_norm is not None:
             hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
-        query = attn.to_q(hidden_states)
+        args = () if USE_PEFT_BACKEND else (scale,)
+        if Linear_Call_Needs_Extra_Args:
+            query = attn.to_q(hidden_states, *args)
+        else:
+            query = attn.to_q(hidden_states)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
@@ -623,8 +700,12 @@ class IPAttnProcessor2_0(torch.nn.Module):
             if attn.norm_cross:
                 encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = attn.to_k(encoder_hidden_states)
-        value = attn.to_v(encoder_hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            key = attn.to_k(encoder_hidden_states, *args)
+            value = attn.to_v(encoder_hidden_states, *args)
+        else:
+            key = attn.to_k(encoder_hidden_states)
+            value = attn.to_v(encoder_hidden_states)
 
         inner_dim = key.shape[-1]
         head_dim = inner_dim // attn.heads
@@ -665,7 +746,10 @@ class IPAttnProcessor2_0(torch.nn.Module):
         hidden_states = hidden_states + self.scale * ip_hidden_states
 
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states)
+        if Linear_Call_Needs_Extra_Args:
+            hidden_states = attn.to_out[0](hidden_states, *args)
+        else:
+            hidden_states = attn.to_out[0](hidden_states)
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 

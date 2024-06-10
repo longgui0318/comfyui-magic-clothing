@@ -1,8 +1,7 @@
 import copy
 import torch
 from safetensors import safe_open
-from .process import load_seg_model, generate_mask
-from .utils import is_torch2_available, prepare_image, prepare_mask
+from .utils import is_torch2_available
 from diffusers import UNet2DConditionModel
 
 if is_torch2_available():
@@ -14,12 +13,11 @@ else:
 import torch.nn.functional as F
 
 class ClothAdapter:
-    def __init__(self, sd_pipe, ref_path, device, enable_cloth_guidance):
-        self.enable_cloth_guidance = enable_cloth_guidance
-        self.device = device
-        self.pipe = sd_pipe.to(self.device)
-        
+    def __init__(self, sd_pipe, ref_path):
+        self.enable_cloth_guidance = True
+        self.pipe = sd_pipe
         self.set_adapter(self.pipe.unet, "write")
+        
         ref_unet = copy.deepcopy(sd_pipe.unet)
         if ref_unet.config.in_channels == 9:
             ref_unet.conv_in = torch.nn.Conv2d(4, 320, ref_unet.conv_in.kernel_size, ref_unet.conv_in.stride, ref_unet.conv_in.padding)
@@ -29,7 +27,8 @@ class ClothAdapter:
             for key in f.keys():
                 state_dict[key] = f.get_tensor(key)
         ref_unet.load_state_dict(state_dict, strict=False)
-        self.ref_unet = ref_unet.to(self.device, dtype=self.pipe.dtype)
+        
+        self.ref_unet = ref_unet.to(self.pipe.device, dtype=self.pipe.dtype)
         self.set_adapter(self.ref_unet, "read")
         self.attn_store = {}
 
@@ -60,17 +59,17 @@ class ClothAdapter:
     ):
         if gen_latents is not None:
             gen_latents = 0.18215 * gen_latents
-            gen_latents=gen_latents.to(self.device).to(dtype=self.pipe.dtype)
-        cloth_latent=cloth_latent.to(self.device).to(dtype=self.pipe.dtype)
-        prompt_embeds_null = prompt_embeds_null.to(self.device).to(dtype=self.pipe.dtype)
-        positive = positive.to(self.device).to(dtype=self.pipe.dtype)
-        negative = negative.to(self.device).to(dtype=self.pipe.dtype)
+            gen_latents=gen_latents.to(self.pipe.device,dtype=self.pipe.dtype)
+        cloth_latent=cloth_latent.to(self.pipe.device,dtype=self.pipe.dtype)
+        prompt_embeds_null = prompt_embeds_null.to(self.pipe.device,dtype=self.pipe.dtype)
+        positive = positive.to(self.pipe.device,dtype=self.pipe.dtype)
+        negative = negative.to(self.pipe.device,dtype=self.pipe.dtype)
         cloth_latent = 0.18215 * cloth_latent
         with torch.inference_mode():
             self.ref_unet(torch.cat([cloth_latent] * num_images_per_prompt), 0, torch.cat([prompt_embeds_null] * num_images_per_prompt), cross_attention_kwargs={"attn_store": self.attn_store})
         
 
-        self.generator = torch.Generator(self.device).manual_seed(seed) if seed is not None else None
+        self.generator = torch.Generator(self.pipe.device).manual_seed(seed) if seed is not None else None
         if self.enable_cloth_guidance:
             images = self.pipe(
                 prompt_embeds=positive,
