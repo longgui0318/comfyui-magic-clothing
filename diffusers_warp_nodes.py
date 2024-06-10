@@ -7,7 +7,34 @@ from comfy import model_management
 
 from .diffusers_magic_clothing.garment_diffusion import ClothAdapter
 from .diffusers_magic_clothing.MagicClothingDiffusionPipeline import MagicClothingDiffusionPipeline
+from diffusers import (
+    AutoencoderKL,
+    DDIMScheduler,
+    DDPMScheduler,
+    DEISMultistepScheduler,
+    DPMSolverMultistepScheduler,
+    DPMSolverSinglestepScheduler,
+    EulerAncestralDiscreteScheduler,
+    EulerDiscreteScheduler,
+    HeunDiscreteScheduler,
+    KDPM2AncestralDiscreteScheduler,
+    KDPM2DiscreteScheduler,
+    UniPCMultistepScheduler,
+)
 
+SCHEDULERS = {
+    'DDIM' : DDIMScheduler,
+    'DDPM' : DDPMScheduler,
+    'DEISMultistep' : DEISMultistepScheduler,
+    'DPMSolverMultistep' : DPMSolverMultistepScheduler,
+    'DPMSolverSinglestep' : DPMSolverSinglestepScheduler,
+    'EulerAncestralDiscrete' : EulerAncestralDiscreteScheduler,
+    'EulerDiscrete' : EulerDiscreteScheduler,
+    'HeunDiscrete' : HeunDiscreteScheduler,
+    'KDPM2AncestralDiscrete' : KDPM2AncestralDiscreteScheduler,
+    'KDPM2Discrete' : KDPM2DiscreteScheduler,
+    'UniPCMultistep' : UniPCMultistepScheduler
+}
 
 class ChangePixelValueNormalization:
     @classmethod
@@ -132,6 +159,7 @@ class RunMagicClothingDiffusersModel:
 
 
 class LoadMagicClothingPipeline:
+    # code base from https://github.com/Limitex/ComfyUI-Diffusers.git
     def __init__(self):
         self.tmp_dir = folder_paths.get_temp_directory()
         self.dtype = torch.float32
@@ -184,6 +212,65 @@ class LoadMagicClothingPipeline:
         return ((pipe, ckpt_conversion_path), pipe.vae, pipe.scheduler)
 
 
+
+class DiffusersSchedulerLoader:
+    # code copy from https://github.com/Limitex/ComfyUI-Diffusers.git
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "pipeline": ("PIPELINE", ),
+                "scheduler_name": (list(SCHEDULERS.keys()), ), 
+            }
+        }
+
+    RETURN_TYPES = ("SCHEDULER",)
+
+    FUNCTION = "load_scheduler"
+
+    CATEGORY = "Diffusers"
+
+    def load_scheduler(self, pipeline, scheduler_name):
+        my_path = os.path.dirname(__file__)
+        my_pipeline_path = os.path.join(my_path, "conversion")
+        if not os.path.exists(my_pipeline_path):
+            os.makedirs(my_pipeline_path)
+        scheduler = SCHEDULERS[scheduler_name].from_pretrained(
+            pretrained_model_name_or_path=pipeline[1],
+            torch_dtype=pipeline[0].dtype,
+            cache_dir=my_pipeline_path,
+            subfolder='scheduler'
+        )
+        return (scheduler,)
+
+class DiffusersModelMakeup:
+    # code copy from https://github.com/Limitex/ComfyUI-Diffusers.git
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "pipeline": ("PIPELINE", ), 
+                "scheduler": ("SCHEDULER", ),
+                "autoencoder": ("AUTOENCODER", ),
+            }, 
+        }
+
+    RETURN_TYPES = ("MAKED_PIPELINE",)
+
+    FUNCTION = "makeup_pipeline"
+
+    CATEGORY = "Diffusers"
+
+    def makeup_pipeline(self, pipeline, scheduler, autoencoder):
+        pipeline = pipeline[0]
+        autoencoder.to(pipeline.device, dtype=pipeline.dtype)
+        pipeline.vae = autoencoder
+        pipeline.scheduler = scheduler
+        pipeline.safety_checker = None if pipeline.safety_checker is None else lambda images, **kwargs: (images, [False])
+        pipeline.enable_attention_slicing()
+        return (pipeline,)
+
 class LoadMagicClothingAdapter:
     @classmethod
     def INPUT_TYPES(s):
@@ -206,6 +293,8 @@ class LoadMagicClothingAdapter:
 
 
 NODE_CLASS_MAPPINGS = {
+    "Diffusers Model Makeup &MC": DiffusersModelMakeup,
+    "Diffusers Scheduler Loader &MC": DiffusersSchedulerLoader,
     "Change Pixel Value Normalization": ChangePixelValueNormalization,
     "Change Pipeline Dtype And Device": ChangePipelineDtypeAndDevice,
     "Load Magic Clothing Pipeline": LoadMagicClothingPipeline,
@@ -214,6 +303,8 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "Diffusers Model Makeup &MC": "Diffusers Model Makeup &MC",
+    "Diffusers Scheduler Loader &MC": "Diffusers Scheduler Loader &MC",
     "Change Pipeline Dtype And Device": "Change Pipeline Dtype And Device",
     "Change Pixel Value Normalization": "Change Pixel Value Normalization",
     "Load Magic Clothing Pipeline":"Load Magic Clothing Pipeline&Diffusers",

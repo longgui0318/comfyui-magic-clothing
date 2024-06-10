@@ -1,5 +1,11 @@
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import *
+import comfy.utils
 
+def prepare_callback(steps):
+    pbar = comfy.utils.ProgressBar(steps)
+    def callback(step, total_steps):
+        pbar.update_absolute(step + 1, total_steps, None)
+    return callback
 
 class MagicClothingDiffusionPipeline(StableDiffusionPipeline):
     @torch.inference_mode
@@ -105,7 +111,7 @@ class MagicClothingDiffusionPipeline(StableDiffusionPipeline):
                 second element is a list of `bool`s indicating whether the corresponding generated image contains
                 "not-safe-for-work" (nsfw) content.
         """
-
+        
         callback = kwargs.pop("callback", None)
         callback_steps = kwargs.pop("callback_steps", None)
 
@@ -171,6 +177,7 @@ class MagicClothingDiffusionPipeline(StableDiffusionPipeline):
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
+        comfyui_callback = prepare_callback(num_inference_steps)
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -219,6 +226,9 @@ class MagicClothingDiffusionPipeline(StableDiffusionPipeline):
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
+                        
+                if comfyui_callback is not None:
+                    comfyui_callback(i,num_inference_steps)
 
         # Offload all models
         self.maybe_free_model_hooks()
