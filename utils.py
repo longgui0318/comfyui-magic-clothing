@@ -65,3 +65,12 @@ def pt_hash(self,key=None):
     if key is not None:
         print(f"Debug Test: {key}====={has_value}")
     return has_value
+
+def pt_first_line(self,key=None):
+    if False:
+        return 
+    first_line = self
+    while first_line.dim() > 1:
+        first_line = first_line[0]
+    if first_line.dim() <= 1 and key is not None:
+        print(f"Debug: {key}====={first_line}")

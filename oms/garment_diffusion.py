@@ -66,7 +66,6 @@ class ClothAdapter:
         positive = positive.to(self.device).to(dtype=self.pipe.dtype)
         negative = negative.to(self.device).to(dtype=self.pipe.dtype)
         cloth_latent = 0.18215 * cloth_latent
-        cloth_latent.__hash_log__("特征提取-衣服潜变量")
         with torch.inference_mode():
             self.ref_unet(torch.cat([cloth_latent] * num_images_per_prompt), 0, torch.cat([prompt_embeds_null] * num_images_per_prompt), cross_attention_kwargs={"attn_store": self.attn_store})
         

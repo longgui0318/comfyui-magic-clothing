@@ -55,7 +55,6 @@ class LoadMagicClothingModel:
     CATEGORY = "loaders"
 
     def load_unet(self, sourceModel, magicClothingUnet):
-        torch.Tensor.__hash_log__ = pt_hash
         unet_path = folder_paths.get_full_path("unet", magicClothingUnet)
         unet_state_dict = comfy.utils.load_torch_file(unet_path)
         model_config = copy.deepcopy(sourceModel.model.model_config)

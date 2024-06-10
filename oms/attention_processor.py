@@ -101,7 +101,6 @@ class REFAttnProcessor(nn.Module):
             do_classifier_free_guidance=None,
             enable_cloth_guidance=None
     ) -> torch.Tensor:
-        hidden_states.__hash_log__(self.name+">>INPUT")
         if self.type == "read":
             attn_store[self.name] = hidden_states
         elif self.type == "write":
@@ -169,7 +168,6 @@ class REFAttnProcessor(nn.Module):
             hidden_states = hidden_states + residual
 
         hidden_states = hidden_states / attn.rescale_output_factor
-        hidden_states.__hash_log__(self.name+">>OUTPUT")
         return hidden_states
 
 
@@ -282,7 +280,6 @@ class REFAttnProcessor2_0(nn.Module):
             do_classifier_free_guidance=False,
             enable_cloth_guidance=True
     ) -> torch.FloatTensor:
-        hash_v = hidden_states.__hash_log__(self.name+">>INPUT")
         if self.type == "read":
             attn_store[self.name] = hidden_states
         elif self.type == "write":
@@ -338,33 +335,20 @@ class REFAttnProcessor2_0(nn.Module):
         key = key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
         value = value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
         
-        if hash_v == "982e82cb1214b687f8bfe790713d778527eb095ba6f0e126c31a2f076ec67816":
-            query.__hash_log__("query")
-            key.__hash_log__("key")
-            value.__hash_log__("value")
-
         # the output of sdp = (batch, num_heads, seq_len, head_dim)
         # TODO: add support for attn.scale when we move to Torch 2.1
         hidden_states = F.scaled_dot_product_attention(
             query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
         )
-        if hash_v == "982e82cb1214b687f8bfe790713d778527eb095ba6f0e126c31a2f076ec67816":
-            hidden_states.__hash_log__("hidden_states1")
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
         hidden_states = hidden_states.to(query.dtype)
 
         if self.type == "write":
             hidden_states, _ = torch.chunk(hidden_states, 2, dim=1)
-        if hash_v == "982e82cb1214b687f8bfe790713d778527eb095ba6f0e126c31a2f076ec67816":
-            hidden_states.__hash_log__("hidden_states2")
         # linear proj
         hidden_states = attn.to_out[0](hidden_states)
-        if hash_v == "982e82cb1214b687f8bfe790713d778527eb095ba6f0e126c31a2f076ec67816":
-            hidden_states.__hash_log__("hidden_states2")
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
-        if hash_v == "982e82cb1214b687f8bfe790713d778527eb095ba6f0e126c31a2f076ec67816":
-            hidden_states.__hash_log__("hidden_states2")
 
         if input_ndim == 4:
             hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
@@ -372,10 +356,7 @@ class REFAttnProcessor2_0(nn.Module):
         if attn.residual_connection:
             hidden_states = hidden_states + residual
 
-        if hash_v == "982e82cb1214b687f8bfe790713d778527eb095ba6f0e126c31a2f076ec67816":
-            hidden_states.__hash_log__("hidden_states3")
         hidden_states = hidden_states / attn.rescale_output_factor
-        hidden_states.__hash_log__(self.name+">>OUTPUT")
         return hidden_states
 
 
@@ -398,7 +379,6 @@ class REFAnimateDiffAttnProcessor2_0(nn.Module):
             attn_store=None,
             do_classifier_free_guidance=False,
     ) -> torch.FloatTensor:
-        hidden_states.__hash_log__(self.name+">>INPUT")
         if self.type == "read":
             attn_store[self.name] = hidden_states
         elif self.type == "write":
@@ -477,7 +457,6 @@ class REFAnimateDiffAttnProcessor2_0(nn.Module):
             hidden_states = hidden_states + residual
 
         hidden_states = hidden_states / attn.rescale_output_factor
-        hidden_states.__hash_log__(self.name+">>OUTPUT")
         return hidden_states
 
 
