@@ -8,7 +8,6 @@ def prepare_callback(steps):
     return callback
 
 class MagicClothingDiffusionPipeline(StableDiffusionPipeline):
-    @torch.inference_mode
     def __call__(
             self,
             prompt: Union[str, List[str]] = None,

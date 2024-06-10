@@ -65,8 +65,7 @@ class ClothAdapter:
         positive = positive.to(self.pipe.device,dtype=self.pipe.dtype)
         negative = negative.to(self.pipe.device,dtype=self.pipe.dtype)
         cloth_latent = 0.18215 * cloth_latent
-        with torch.inference_mode():
-            self.ref_unet(torch.cat([cloth_latent] * num_images_per_prompt), 0, torch.cat([prompt_embeds_null] * num_images_per_prompt), cross_attention_kwargs={"attn_store": self.attn_store})
+        self.ref_unet(torch.cat([cloth_latent] * num_images_per_prompt), 0, torch.cat([prompt_embeds_null] * num_images_per_prompt), cross_attention_kwargs={"attn_store": self.attn_store})
         
 
         self.generator = torch.Generator(self.pipe.device).manual_seed(seed) if seed is not None else None
