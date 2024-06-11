@@ -137,11 +137,11 @@ class RunMagicClothingDiffusersModel:
             prompt_embeds_null = magicClothingAdapter.pipe.encode_prompt(
                 [""], device=magicClothingAdapter.pipe.device, num_images_per_prompt=1, do_classifier_free_guidance=False)[0]
             prompt_embeds, negative_prompt_embeds = magicClothingAdapter.pipe.encode_prompt(
-                "a photography of a model,best quality, high quality",
+                positive,
                 magicClothingAdapter.pipe.device,
                 batch_size,
                 True,
-                "bare, monochrome, lowres, bad anatomy, worst quality, low quality",
+                negative,
                 prompt_embeds=None,
                 negative_prompt_embeds=None,
                 lora_scale=None,
