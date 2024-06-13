@@ -75,7 +75,7 @@ class UnetFunctionWrapper:
             c_concat_data,c_concat_data_new = self._reorganization_c_data_(c,"c_concat")
             c_crossattn_data,c_crossattn_data_new = self._reorganization_c_data_(c,"c_crossattn")
             c_attn_stored_mult_data,_ = self._reorganization_c_data_(c,"c_attn_stored_mult")
-            c_attn_stored_area_data,_ = self._reorganization_c_data_(c,"c_attn_stored_area")
+            c_attn_stored_area_data = c["c_attn_stored_area"] if "c_attn_stored_area" in c else None
             c_attn_stored_control_data = c["c_attn_stored_control"] if "c_attn_stored_control" in c else None
             #移除因为注入增加的内容，后续已不再需要
             c["c_attn_stored_mult"] = None
@@ -101,7 +101,7 @@ class UnetFunctionWrapper:
                         area = c_attn_stored_area_data[i]
                         cond_or_uncond_extra_options[i+1] = {
                             "mult": mult.squeeze(0),
-                            "area": (area[0][0],area[0][1],area[0][2],area[0][3])
+                            "area": area
                         }
                     # 注意，在启用特征引导的时候，需要增加一个负向空特征来处理，这个复制的负向特征是给后面计算空特征用的
                     cond_or_uncond_replenishment.append(2)
@@ -159,10 +159,18 @@ class UnetFunctionWrapper:
                         attn_stored["cond_or_uncond_out_count"] = attn_stored["out_count_init"]
                     mult = cond_or_uncond_extra_option["mult"]
                     area = cond_or_uncond_extra_option["area"]
-
-                    attn_stored["cond_or_uncond_out_cond"][:, :, area[2]:area[0] +
-                                                           area[2], area[3]:area[1] + area[3]] += pred_result[i] * mult
-                    attn_stored["cond_or_uncond_out_count"][:, :, area[2]:area[0] + area[2], area[3]:area[1] + area[3]] += mult
+                    if area is None:
+                        attn_stored["cond_or_uncond_out_cond"] += pred_result[i] * mult
+                        attn_stored["cond_or_uncond_out_count"] += mult
+                    else:
+                        out_c = attn_stored["cond_or_uncond_out_cond"]
+                        out_cts = attn_stored["cond_or_uncond_out_count"]
+                        dims = len(area) // 2
+                        for i in range(dims):
+                            out_c = out_c.narrow(i + 2, area[i + dims], area[i])
+                            out_cts = out_cts.narrow(i + 2, area[i + dims], area[i])
+                        out_c += pred_result[i] * mult
+                        out_cts += mult
                 else:
                     new_output.append(pred_result[i])
             output = torch.cat(new_output)

@@ -14,30 +14,34 @@ from comfy import model_management
 from .attn_handler import SaveAttnInputPatch, InputPatch, ReplacePatch, UnetFunctionWrapper, SamplerCfgFunctionWrapper
 
 class AttnStoredExtra:
-    def __init__(self,extra) -> None:
-        if isinstance(extra, torch.Tensor):
-            self.pt = extra.unsqueeze(0)
-            self.extra = None
+    def __init__(self,extra,type=1) -> None:
+        self.type = type
+        if type == 1:
+            self.data = extra.unsqueeze(0)
         else:
-            self.pt = None
-            self.extra = extra
+            self.data = extra
     
     def can_concat(self,other):
         return True
     
     def concat(self, extras):
-        if self.pt is not None:  
-            out = [self.pt]
+        if self.type == 1:
+            out = [self.data]
             for x in extras:
-                out.append(x.pt)
+                out.append(x.data)
             return torch.cat(out)
+        elif self.type == 2:
+            out = [self.data]
+            for x in extras:
+                out.append(x.data)
+            return out
         else:
-            if self.extra is None:
-                return self.extra
+            if self.data is not None:
+                return self.data
             else:
                 for x in extras:
-                    if x.extra is not None:
-                        return x.extra
+                    if x.data is not None:
+                        return x.data
                 return None
     
 class LoadMagicClothingModel:
@@ -144,9 +148,9 @@ class AddMagicClothingAttention:
             conditioning = result[2]
             area = result[3]
             control = result[4]
-            conditioning["c_attn_stored_mult"] = AttnStoredExtra(mult)
-            conditioning["c_attn_stored_area"] = AttnStoredExtra(torch.tensor([area[0],area[1],area[2],area[3]]))
-            conditioning["c_attn_stored_control"] = AttnStoredExtra(control)
+            conditioning["c_attn_stored_mult"] = AttnStoredExtra(mult, 1)
+            conditioning["c_attn_stored_area"] = AttnStoredExtra(area, 2)
+            conditioning["c_attn_stored_control"] = AttnStoredExtra(control, 3)
             return result
         comfy.samplers.get_area_and_mult = get_area_and_mult
 
