@@ -1,0 +1,14 @@
+[project]
+name = "comfyui-magic-clothing"
+description = "The comfyui supported version of the [a/Magic Clothing](https://github.com/ShineChen1024/MagicClothing) project, not the diffusers version, allows direct integration with modules such as ipadapter"
+version = "1.0.0"
+license = "LICENSE"
+
+[project.urls]
+Repository = "https://github.com/longgui0318/comfyui-magic-clothing"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "comfyui-magic-clothing"
+Icon = ""
