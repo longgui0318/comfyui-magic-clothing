@@ -8,6 +8,7 @@ The comfyui supported version of the [Magic Clothing](https://github.com/ShineCh
 * Go to [huggingface](https://huggingface.co/ShineChen1024/MagicClothing) to download the models and move them to the `comfyui/models/unet` folder
 
 ## For samples, please refer to [here](./example.json)
+## For ipadapter samples, please refer to [here](./ipadapter.json)
 
 
 # Note

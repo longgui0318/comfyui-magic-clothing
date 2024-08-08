@@ -64,6 +64,7 @@ class UnetFunctionWrapper:
             enable_feature_guidance = attn_stored["enable_feature_guidance"]
             cond_or_uncond = parameters["cond_or_uncond"]
             cond_or_uncond_replenishment = []
+            cond_or_uncond_new = []
             # 对传入参数进行调整，调整方式如下
             # A 对负向提示词，复制一份，这是为了计算出空数据的情况，插入的方式在前面
             # B 对正向忽略
@@ -94,6 +95,7 @@ class UnetFunctionWrapper:
                     c_crossattn_data_new.append(c_crossattn_data[i])
                 
                 cond_or_uncond_replenishment.append(1 if cond_flag == 1 else 0)
+                cond_or_uncond_new.append(1 if cond_flag == 1 else 0)
                 if enable_feature_guidance and cond_flag == 1:
                     
                     if c_attn_stored_mult_data is not None and  c_attn_stored_area_data is not None:
@@ -105,6 +107,7 @@ class UnetFunctionWrapper:
                         }
                     # 注意，在启用特征引导的时候，需要增加一个负向空特征来处理，这个复制的负向特征是给后面计算空特征用的
                     cond_or_uncond_replenishment.append(2)
+                    cond_or_uncond_new.append(1)
                     new_input_array.append(input_array[i])
                     new_timestep.append(timestep_array[i])
                     if c_concat_data is not None:
@@ -125,7 +128,8 @@ class UnetFunctionWrapper:
                 c['control'] = c_attn_stored_control_data.get_control(input, timestep, c, len(cond_or_uncond_replenishment))
             attn_stored["cond_or_uncond_replenishment"] = cond_or_uncond_replenishment
             attn_stored["cond_or_uncond_extra_options"] = cond_or_uncond_extra_options
-
+            c["cond_or_uncond"] = cond_or_uncond_new
+            c["transformer_options"]["cond_or_uncond"] = cond_or_uncond_new
             # 直接清理，节省内存
             del input_array
             del timestep_array

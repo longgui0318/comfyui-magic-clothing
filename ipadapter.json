@@ -1,0 +1,916 @@
+{
+  "last_node_id": 110,
+  "last_link_id": 250,
+  "nodes": [
+    {
+      "id": 101,
+      "type": "BiRefNet",
+      "pos": [
+        550,
+        300
+      ],
+      "size": {
+        "0": 315,
+        "1": 58
+      },
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 228
+        }
+      ],
+      "outputs": [
+        {
+          "name": "mask",
+          "type": "MASK",
+          "links": [
+            229
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BiRefNet"
+      },
+      "widgets_values": [
+        "cuda:0"
+      ]
+    },
+    {
+      "id": 67,
+      "type": "CLIPTextEncode",
+      "pos": [
+        890,
+        780
+      ],
+      "size": {
+        "0": 210,
+        "1": 76
+      },
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 166
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            141
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode"
+      },
+      "widgets_values": [
+        "bare, monochrome, lowres, bad anatomy, worst quality, low quality"
+      ]
+    },
+    {
+      "id": 35,
+      "type": "VAEDecode",
+      "pos": [
+        1890,
+        730
+      ],
+      "size": {
+        "0": 210,
+        "1": 46
+      },
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 170
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 225
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            227
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEDecode"
+      }
+    },
+    {
+      "id": 100,
+      "type": "PreviewImage",
+      "pos": [
+        1760,
+        880
+      ],
+      "size": {
+        "0": 210,
+        "1": 246
+      },
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 227
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      }
+    },
+    {
+      "id": 103,
+      "type": "PreviewImage",
+      "pos": [
+        1510,
+        880
+      ],
+      "size": {
+        "0": 210,
+        "1": 246
+      },
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 232
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      }
+    },
+    {
+      "id": 66,
+      "type": "CLIPTextEncode",
+      "pos": [
+        890,
+        650
+      ],
+      "size": {
+        "0": 210,
+        "1": 76
+      },
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 165
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            140
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode"
+      },
+      "widgets_values": [
+        "a photography of a model,best quality, high quality"
+      ]
+    },
+    {
+      "id": 77,
+      "type": "KSampler",
+      "pos": [
+        1926,
+        183
+      ],
+      "size": {
+        "0": 315,
+        "1": 262
+      },
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 250
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 140
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 141
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 192
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            170
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "KSampler"
+      },
+      "widgets_values": [
+        834064559708728,
+        "fixed",
+        20,
+        5,
+        "uni_pc",
+        "normal",
+        1
+      ]
+    },
+    {
+      "id": 107,
+      "type": "IPAdapterUnifiedLoader",
+      "pos": [
+        360,
+        1075
+      ],
+      "size": {
+        "0": 315,
+        "1": 78
+      },
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 248
+        },
+        {
+          "name": "ipadapter",
+          "type": "IPADAPTER",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            245
+          ],
+          "shape": 3,
+          "slot_index": 0
+        },
+        {
+          "name": "ipadapter",
+          "type": "IPADAPTER",
+          "links": [
+            243
+          ],
+          "shape": 3,
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "IPAdapterUnifiedLoader"
+      },
+      "widgets_values": [
+        "STANDARD (medium strength)"
+      ]
+    },
+    {
+      "id": 42,
+      "type": "VAEEncode",
+      "pos": [
+        1240,
+        170
+      ],
+      "size": {
+        "0": 210,
+        "1": 46
+      },
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "pixels",
+          "type": "IMAGE",
+          "link": 231
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 217
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            222
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEEncode"
+      }
+    },
+    {
+      "id": 80,
+      "type": "CheckpointLoaderSimple",
+      "pos": [
+        217,
+        929
+      ],
+      "size": {
+        "0": 315,
+        "1": 98
+      },
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            248
+          ],
+          "shape": 3,
+          "slot_index": 0
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            165,
+            166,
+            226
+          ],
+          "shape": 3,
+          "slot_index": 1
+        },
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            217,
+            225
+          ],
+          "shape": 3,
+          "slot_index": 2
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CheckpointLoaderSimple"
+      },
+      "widgets_values": [
+        "Realistic_Vision_V4.0_fp16-no-ema.safetensors"
+      ]
+    },
+    {
+      "id": 110,
+      "type": "IPAdapter",
+      "pos": [
+        785,
+        1068
+      ],
+      "size": {
+        "0": 315,
+        "1": 190
+      },
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 245
+        },
+        {
+          "name": "ipadapter",
+          "type": "IPADAPTER",
+          "link": 243
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 247
+        },
+        {
+          "name": "attn_mask",
+          "type": "MASK",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            249
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "IPAdapter"
+      },
+      "widgets_values": [
+        1,
+        0,
+        1,
+        "standard"
+      ]
+    },
+    {
+      "id": 76,
+      "type": "Load Magic Clothing Model",
+      "pos": [
+        218,
+        651
+      ],
+      "size": {
+        "0": 380.4000244140625,
+        "1": 78
+      },
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "sourceModel",
+          "type": "MODEL",
+          "link": 249
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sourceModel",
+          "type": "MODEL",
+          "links": [
+            223
+          ],
+          "shape": 3,
+          "slot_index": 0
+        },
+        {
+          "name": "magicClothingModel",
+          "type": "MODEL",
+          "links": [
+            224
+          ],
+          "shape": 3,
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Load Magic Clothing Model"
+      },
+      "widgets_values": [
+        "oms_diffusion_768_200000.safetensors"
+      ]
+    },
+    {
+      "id": 19,
+      "type": "LoadImage",
+      "pos": [
+        220,
+        170
+      ],
+      "size": {
+        "0": 315,
+        "1": 314
+      },
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            228,
+            230
+          ],
+          "shape": 3,
+          "slot_index": 0
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null,
+          "shape": 3
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "ComfyUI_00002_.png",
+        "image"
+      ]
+    },
+    {
+      "id": 98,
+      "type": "Add Magic Clothing Attention",
+      "pos": [
+        1492,
+        164
+      ],
+      "size": {
+        "0": 315,
+        "1": 166
+      },
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "sourceModel",
+          "type": "MODEL",
+          "link": 223
+        },
+        {
+          "name": "magicClothingModel",
+          "type": "MODEL",
+          "link": 224
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 226
+        },
+        {
+          "name": "feature_image",
+          "type": "LATENT",
+          "link": 222
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            250
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Add Magic Clothing Attention"
+      },
+      "widgets_values": [
+        true,
+        2.5
+      ]
+    },
+    {
+      "id": 102,
+      "type": "Image Adaptive Crop With Mask",
+      "pos": [
+        880,
+        170
+      ],
+      "size": {
+        "0": 315,
+        "1": 126
+      },
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 230
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 229
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            231,
+            232,
+            247
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Image Adaptive Crop With Mask"
+      },
+      "widgets_values": [
+        512,
+        512,
+        8
+      ]
+    },
+    {
+      "id": 89,
+      "type": "EmptyLatentImage",
+      "pos": [
+        1540,
+        580
+      ],
+      "size": {
+        "0": 315,
+        "1": 106
+      },
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            192
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "EmptyLatentImage"
+      },
+      "widgets_values": [
+        512,
+        512,
+        1
+      ]
+    }
+  ],
+  "links": [
+    [
+      140,
+      66,
+      0,
+      77,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      141,
+      67,
+      0,
+      77,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      165,
+      80,
+      1,
+      66,
+      0,
+      "CLIP"
+    ],
+    [
+      166,
+      80,
+      1,
+      67,
+      0,
+      "CLIP"
+    ],
+    [
+      170,
+      77,
+      0,
+      35,
+      0,
+      "LATENT"
+    ],
+    [
+      192,
+      89,
+      0,
+      77,
+      3,
+      "LATENT"
+    ],
+    [
+      217,
+      80,
+      2,
+      42,
+      1,
+      "VAE"
+    ],
+    [
+      222,
+      42,
+      0,
+      98,
+      3,
+      "LATENT"
+    ],
+    [
+      223,
+      76,
+      0,
+      98,
+      0,
+      "MODEL"
+    ],
+    [
+      224,
+      76,
+      1,
+      98,
+      1,
+      "MODEL"
+    ],
+    [
+      225,
+      80,
+      2,
+      35,
+      1,
+      "VAE"
+    ],
+    [
+      226,
+      80,
+      1,
+      98,
+      2,
+      "CLIP"
+    ],
+    [
+      227,
+      35,
+      0,
+      100,
+      0,
+      "IMAGE"
+    ],
+    [
+      228,
+      19,
+      0,
+      101,
+      0,
+      "IMAGE"
+    ],
+    [
+      229,
+      101,
+      0,
+      102,
+      1,
+      "MASK"
+    ],
+    [
+      230,
+      19,
+      0,
+      102,
+      0,
+      "IMAGE"
+    ],
+    [
+      231,
+      102,
+      0,
+      42,
+      0,
+      "IMAGE"
+    ],
+    [
+      232,
+      102,
+      0,
+      103,
+      0,
+      "IMAGE"
+    ],
+    [
+      243,
+      107,
+      1,
+      110,
+      1,
+      "IPADAPTER"
+    ],
+    [
+      245,
+      107,
+      0,
+      110,
+      0,
+      "MODEL"
+    ],
+    [
+      247,
+      102,
+      0,
+      110,
+      2,
+      "IMAGE"
+    ],
+    [
+      248,
+      80,
+      0,
+      107,
+      0,
+      "MODEL"
+    ],
+    [
+      249,
+      110,
+      0,
+      76,
+      0,
+      "MODEL"
+    ],
+    [
+      250,
+      98,
+      0,
+      77,
+      0,
+      "MODEL"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "workspace_info": {
+      "id": "uYaY8JVGliGxX8okXvJP4",
+      "name": "Untitled Flow",
+      "saveLock": false,
+      "cloudID": null,
+      "coverMediaPath": null
+    },
+    "ds": {
+      "scale": 1.1,
+      "offset": {
+        "0": -231.94835430034072,
+        "1": -63.33645446524065
+      }
+    }
+  },
+  "version": 0.4
+}
